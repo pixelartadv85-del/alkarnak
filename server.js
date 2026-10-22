@@ -8,8 +8,10 @@ const { seed, defaultSettings, hashPassword, writeSeedImages } = require('./lib/
 const ai = require('./lib/ai');
 
 const PORT = process.env.PORT || 3000;
+const db = () => store.db;
 store.load(seed);
 writeSeedImages();
+
 migrateSettings();
 
 const app = express();
@@ -22,8 +24,6 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   next();
 });
-
-const db = () => store.db;
 
 // ---------------------------------------------------------------- أدوات مساعدة
 const round2 = (n) => Math.round(n * 100) / 100;
