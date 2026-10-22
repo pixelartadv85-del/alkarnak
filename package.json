@@ -1,0 +1,27 @@
+{
+  "name": "aljalil-store",
+  "version": "1.0.0",
+  "description": "متجر الجليل للطب البديل",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pixelartadv85-del/alkarnak.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/pixelartadv85-del/alkarnak/issues"
+  },
+  "homepage": "https://github.com/pixelartadv85-del/alkarnak#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
+    "express": "^4.22.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
