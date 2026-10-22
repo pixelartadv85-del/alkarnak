@@ -91,7 +91,8 @@
   function applyTheme() {
     const s = S.data.settings;
     const c = s.colors;
-    loadFonts([s.fontFamily, s.headingFont, s.nameFont]);
+    const typo = s.typography || {};
+    loadFonts([s.fontFamily, s.headingFont, s.nameFont, ...Object.values(typo).map((t) => t && t.font)]);
     const ink = luminance(c.primary) > 0.6 ? '#1d1a10' : '#ffffff';
     const light = `--primary:${c.primary};--primary-rgb:${hexToRgb(c.primary)};--primary-ink:${ink};--accent:${c.accent};--accent-rgb:${hexToRgb(c.accent)};
       --bg:${c.background};--surface:${c.surface};--surface-2:${mix(c.background, c.text, 0.05)};--text:${c.text};--muted:${mix(c.text, c.background, 0.42)};
@@ -104,15 +105,70 @@
       --font-brand:'${s.nameFont}','${s.headingFont}',serif;--base-size:${s.baseFontSize}px;--logo-size:${s.logoSize}px;--logo-radius:${s.logoRadius}%;--name-size:${s.nameSize}px}
       html[data-dark="1"]{${dark}color-scheme:dark}
       html[data-dark="1"] .brand-name{color:${mix(c.primary, '#ffffff', 0.55)}}`;
-    $('#custom-css').textContent = s.customCss || '';
+    $('#custom-css').textContent = typographyCSS(typo) + (s.customCss || '');
     setDark();
   }
 
+  // الخط والحجم والوزن واللون لكل جزء من الموقع بشكل منفصل (من لوحة التحكم ← الخطوط لكل قسم)
+  const TYPO_SELECTORS = {
+    body: 'body',
+    announce: '.announce',
+    nav: '.nav a, #mobileLinks a',
+    brandTag: '.brand-tag',
+    heroBadge: '.slide-badge',
+    heroTitle: '.slide h1',
+    heroText: '.slide p',
+    buttons: '.btn',
+    featureTitle: '.feature h4',
+    featureText: '.feature p',
+    sectionTitle: '.section-head h2, .page-hero h1',
+    sectionSub: '.section-head p',
+    categoryName: '.cat-card h3',
+    cardTitle: '.card-title, .card-title a',
+    cardPrice: '.card .price b',
+    tags: '.tag',
+    productTitle: '.p-info h1',
+    productPrice: '.p-price b',
+    productText: '.p-short, .tab-pane, .benefits li',
+    productTabs: '.tab-btns button',
+    reviews: '.testi p, .review p',
+    advisorTitle: '.advisor-banner h2',
+    advisorText: '.advisor-banner p',
+    chat: '.bubble, .offer-body',
+    forms: '.input, .textarea, .select, .field label',
+    cart: '.drawer, .summary-item',
+    popupTitle: '.popup-body h3',
+    popupText: '.popup-body p',
+    footerTitle: '.footer h4, .footer-brand',
+    footer: '.footer p, .footer li, .footer-bottom',
+  };
+  const cleanFont = (f) => String(f || '').replace(/[^\w\s-]/g, '').trim();
+  function typographyCSS(typo) {
+    let css = '', mobile = '';
+    for (const [key, sel] of Object.entries(TYPO_SELECTORS)) {
+      const t = typo[key];
+      if (!t) continue;
+      const scoped = sel.split(',').map((x) => 'html ' + x.trim()).join(', ');
+      const rules = [];
+      const font = cleanFont(t.font);
+      if (font) rules.push(`font-family:'${font}','${cleanFont(S.data.settings.fontFamily)}',system-ui,sans-serif`);
+      const size = Number(t.size);
+      if (size > 0) {
+        rules.push(`font-size:${size}px`);
+        if (size > 20) mobile += `${scoped}{font-size:${Math.round(size * 0.78)}px}`;
+      }
+      if (t.weight) rules.push(`font-weight:${t.weight === 'bold' ? 700 : 400}`);
+      if (/^#[0-9a-f]{3,8}$/i.test(t.color || '')) rules.push(`color:${t.color}`);
+      if (rules.length) css += `${scoped}{${rules.join(';')}}\n`;
+    }
+    return css + (mobile ? `@media (max-width:700px){${mobile}}\n` : '');
+  }
+
   // بعض الخطوط متوفرة بوزن واحد فقط، وطلب وزن غير موجود يُفشل تحميل الخط
-  const SINGLE_WEIGHT = ['Lalezar', 'Rakkas', 'Jomhuria', 'Katibeh', 'Mirza'];
+  const SINGLE_WEIGHT = ['Lalezar', 'Rakkas', 'Jomhuria', 'Katibeh', 'Vibes', 'Blaka', 'Gulzar'];
   function loadFonts(list) {
     $$('link[data-font]').forEach((l) => l.remove());
-    for (const f of [...new Set(list.filter(Boolean))]) {
+    for (const f of [...new Set(list.map(cleanFont).filter(Boolean))]) {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.dataset.font = f;

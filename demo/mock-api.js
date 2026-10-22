@@ -249,7 +249,7 @@
     if (path === '/admin/settings') {
       need();
       if (method === 'GET') return d.settings;
-      for (const [k, v] of Object.entries(body)) d.settings[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...d.settings[k], ...v } : v;
+      for (const [k, v] of Object.entries(body)) d.settings[k] = k !== 'typography' && v && typeof v === 'object' && !Array.isArray(v) ? { ...d.settings[k], ...v } : v;
       save(); return d.settings;
     }
     if (path === '/admin/users' && method === 'GET') { need('users'); return d.users.map(safeUser); }

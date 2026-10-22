@@ -183,3 +183,9 @@ tbody tr:hover td { background: var(--card2); }
   .modal { box-shadow: none; width: 100%; }
   #root { display: none; }
 }
+
+/* الخطوط لكل قسم */
+.typo-table td { vertical-align: middle; }
+.typo-table td:first-child { min-width: 220px; }
+.typo-table .sel { min-width: 170px; }
+.typo-prev { margin-top: 4px; font-size: 1.05em; color: var(--muted); line-height: 1.5; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

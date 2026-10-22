@@ -88,7 +88,7 @@
     ['المبيعات', [['orders', '🧾', 'الطلبات', 'orders'], ['blends', '🍵', 'طلبات الخلطات (AI)', 'orders']]],
     ['الكتالوج', [['products', '📦', 'المنتجات', 'catalog'], ['categories', '🗂️', 'الأقسام', 'catalog'], ['reviews', '⭐', 'التقييمات', 'catalog']]],
     ['المحتوى', [['slides', '🖼️', 'السلايدر', 'content'], ['popup', '📢', 'الإعلان المنبثق', 'content'], ['home', '🏠', 'الصفحة الرئيسية', 'content'], ['texts', '✏️', 'النصوص', 'content']]],
-    ['الإعدادات', [['identity', '🌿', 'الاسم والشعار', 'settings'], ['design', '🎨', 'الألوان والخطوط', 'settings'], ['contact', '📞', 'التواصل وواتساب', 'settings'], ['shop', '🚚', 'الشحن والأسعار', 'settings'], ['coupons', '🏷️', 'كوبونات الخصم', 'settings'], ['ai', '🤖', 'المستشار الذكي', 'settings']]],
+    ['الإعدادات', [['identity', '🌿', 'الاسم والشعار', 'settings'], ['design', '🎨', 'الألوان والخطوط', 'settings'], ['typography', '🔤', 'الخطوط لكل قسم', 'settings'], ['contact', '📞', 'التواصل وواتساب', 'settings'], ['shop', '🚚', 'الشحن والأسعار', 'settings'], ['coupons', '🏷️', 'كوبونات الخصم', 'settings'], ['ai', '🤖', 'المستشار الذكي', 'settings']]],
     ['النظام', [['users', '👥', 'المستخدمون', 'users'], ['backup', '💾', 'النسخ الاحتياطي', 'users'], ['account', '🔐', 'حسابي', null]]],
   ];
 
@@ -167,7 +167,33 @@
   const confirmDo = (msg) => window.confirm(msg);
 
   // ---------------------------------------------------------------- مكوّنات النماذج
-  const FONTS = ['Tajawal', 'Cairo', 'Almarai', 'IBM Plex Sans Arabic', 'Noto Kufi Arabic', 'Readex Pro', 'Changa', 'El Messiri', 'Reem Kufi', 'Amiri', 'Lemonada', 'Marhey', 'Aref Ruqaa', 'Lalezar', 'Rakkas'];
+  const FONTS = ['Tajawal', 'Cairo', 'Almarai', 'IBM Plex Sans Arabic', 'Noto Kufi Arabic', 'Noto Sans Arabic', 'Noto Naskh Arabic', 'Readex Pro', 'Alexandria', 'Changa', 'Mada', 'Harmattan', 'Baloo Bhaijaan 2', 'Kufam', 'El Messiri', 'Reem Kufi', 'Amiri', 'Scheherazade New', 'Lemonada', 'Marhey', 'Aref Ruqaa', 'Lalezar', 'Rakkas', 'Vibes', 'Blaka', 'Gulzar'];
+  const SINGLE_WEIGHT = ['Lalezar', 'Rakkas', 'Vibes', 'Blaka', 'Gulzar'];
+  let fontsPreviewLoaded = false;
+  function loadPreviewFonts() {
+    if (fontsPreviewLoaded) return;
+    fontsPreviewLoaded = true;
+    // رابط لكل خط حتى لا يُفشل خطٌّ واحد تحميل البقية
+    for (const f of FONTS) {
+      const l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = `https://fonts.googleapis.com/css2?family=${f.replace(/ /g, '+')}${SINGLE_WEIGHT.includes(f) ? '' : ':wght@400;700'}&display=swap`;
+      document.head.append(l);
+    }
+  }
+
+  // أجزاء الموقع التي يمكن ضبط خطها بشكل منفصل (المفاتيح تطابق TYPO_SELECTORS في store.js)
+  const TYPO_PARTS = [
+    ['عام', [['body', 'نص الموقع العام']]],
+    ['أعلى الموقع', [['announce', 'شريط الإعلانات المتحرك'], ['nav', 'روابط القائمة'], ['brandTag', 'الشعار النصي تحت الاسم']]],
+    ['السلايدر', [['heroBadge', 'الشارة الصغيرة'], ['heroTitle', 'العنوان الكبير'], ['heroText', 'النص تحت العنوان']]],
+    ['الصفحة الرئيسية', [['featureTitle', 'عناوين المزايا'], ['featureText', 'نصوص المزايا'], ['sectionTitle', 'عناوين الأقسام والصفحات'], ['sectionSub', 'الوصف تحت العناوين'], ['categoryName', 'أسماء الأقسام'], ['advisorTitle', 'عنوان بانر المستشار'], ['advisorText', 'نص بانر المستشار'], ['reviews', 'آراء الزبائن']]],
+    ['بطاقات المنتجات', [['cardTitle', 'اسم المنتج'], ['cardPrice', 'السعر'], ['tags', 'الشارات (خصم، جديد…)']]],
+    ['صفحة المنتج', [['productTitle', 'اسم المنتج'], ['productPrice', 'السعر'], ['productText', 'الوصف والفوائد'], ['productTabs', 'تبويبات (الوصف، الفوائد…)']]],
+    ['الطلب والسلة', [['buttons', 'كل الأزرار'], ['forms', 'حقول التعبئة'], ['cart', 'السلة وملخص الطلب']]],
+    ['المستشار والإعلان', [['chat', 'رسائل المحادثة'], ['popupTitle', 'عنوان الإعلان المنبثق'], ['popupText', 'نص الإعلان المنبثق']]],
+    ['الفوتر', [['footerTitle', 'عناوين الفوتر'], ['footer', 'نصوص الفوتر']]],
+  ];
 
   // يبني حقلاً من تعريف: {k, label, type, opts, hint, full, min, max, step, unit}
   function fieldHTML(fd, val) {
@@ -181,7 +207,7 @@
       case 'range': input = `<div class="range-in"><input type="range" id="${id}" data-k="${fd.k}" value="${esc(v)}" min="${fd.min}" max="${fd.max}" step="${fd.step || 1}" data-num oninput="this.nextElementSibling.value=this.value+'${fd.unit || ''}'"><output>${esc(v)}${fd.unit || ''}</output></div>`; break;
       case 'color': input = `<div class="color-in"><input type="color" value="${esc(v || '#000000')}" oninput="this.nextElementSibling.value=this.value"><input class="in" id="${id}" data-k="${fd.k}" value="${esc(v)}" dir="ltr" placeholder="${fd.optional ? 'تلقائي' : '#000000'}" oninput="if(/^#[0-9a-f]{6}$/i.test(this.value))this.previousElementSibling.value=this.value"></div>`; break;
       case 'select': input = `<select class="sel" id="${id}" data-k="${fd.k}">${fd.opts.map(([ov, ot]) => `<option value="${esc(ov)}" ${String(v) === String(ov) ? 'selected' : ''}>${esc(ot)}</option>`).join('')}</select>`; break;
-      case 'font': input = `<select class="sel" id="${id}" data-k="${fd.k}">${FONTS.map((f) => `<option ${v === f ? 'selected' : ''}>${f}</option>`).join('')}</select>`; break;
+      case 'font': loadPreviewFonts(); input = `<select class="sel" id="${id}" data-k="${fd.k}" style="font-family:'${esc(v)}'" onchange="this.style.fontFamily=\`'\${this.value}'\`">${FONTS.map((f) => `<option ${v === f ? 'selected' : ''} style="font-family:'${f}'">${f}</option>`).join('')}</select>`; break;
       case 'bool': input = `<label class="switch"><input type="checkbox" id="${id}" data-k="${fd.k}" ${v ? 'checked' : ''} data-bool><i></i> ${esc(fd.text || 'مفعّل')}</label>`; break;
       case 'image': input = `<div class="img-in"><img class="prev" src="${esc(safeUrl(v))}" alt="" onerror="this.style.visibility='hidden'" onload="this.style.visibility='visible'"><div style="flex:1;display:grid;gap:6px"><input class="in" id="${id}" data-k="${fd.k}" value="${esc(v)}" dir="ltr" placeholder="رابط الصورة أو ارفع صورة" data-img-input>
         <div class="row"><label class="btn btn-sec btn-sm">⬆ رفع صورة<input type="file" accept="image/*" hidden data-upload="${id}"></label>${v ? `<button type="button" class="btn btn-sec btn-sm" data-clear="${id}">إزالة</button>` : ''}</div></div></div>`; break;
@@ -504,12 +530,64 @@
         { k: 'colors.darkBackground', label: 'خلفية الوضع الليلي', type: 'color' }, { k: 'colors.darkSurface', label: 'بطاقات الوضع الليلي', type: 'color' },
       ]],
       ['الخطوط والأحجام', [
-        { k: 'fontFamily', label: 'خط النصوص', type: 'font' }, { k: 'headingFont', label: 'خط العناوين', type: 'font' },
+        { k: 'fontFamily', label: 'خط النصوص', type: 'font', hint: 'لتغيير خط كل جزء بشكل منفصل افتح صفحة "الخطوط لكل قسم"' }, { k: 'headingFont', label: 'خط العناوين', type: 'font' },
         { k: 'baseFontSize', label: 'حجم الخط الأساسي', type: 'range', min: 13, max: 20, unit: 'px' },
         { k: 'radius', label: 'استدارة الزوايا', type: 'range', min: 0, max: 32, unit: 'px' },
       ]],
       ['CSS مخصص (متقدم)', [{ k: 'customCss', label: 'كود CSS إضافي', type: 'textarea', code: true, hint: 'للتحكم الدقيق بأي تفصيل في التصميم. مثال: .card-title{font-size:18px}' }]],
     ]),
+
+    async typography(c) {
+      A.settings = await api('/settings');
+      loadPreviewFonts();
+      const typo = JSON.parse(JSON.stringify(A.settings.typography || {}));
+      const base = A.settings.fontFamily;
+      const row = (key, label) => {
+        const t = typo[key] || {};
+        return `<tr data-row="${key}">
+          <td><b>${esc(label)}</b><div class="typo-prev" data-prev="${key}">الجليل – طبيعة نقية 123 ₪</div></td>
+          <td><select class="sel" data-t="font"><option value="">افتراضي</option>${FONTS.map((f) => `<option value="${f}" ${t.font === f ? 'selected' : ''} style="font-family:'${f}'">${f}</option>`).join('')}</select></td>
+          <td><div class="row" style="flex-wrap:nowrap"><input class="in" type="number" min="0" max="120" data-t="size" value="${t.size || ''}" placeholder="افتراضي" style="width:96px"><span class="muted">px</span></div></td>
+          <td><select class="sel" data-t="weight"><option value="">افتراضي</option><option value="normal" ${t.weight === 'normal' ? 'selected' : ''}>عادي</option><option value="bold" ${t.weight === 'bold' ? 'selected' : ''}>عريض</option></select></td>
+          <td><div class="color-in"><input type="color" value="${esc(t.color || '#2f5d3a')}" data-t-picker><input class="in" data-t="color" value="${esc(t.color || '')}" placeholder="افتراضي" dir="ltr" style="width:100px"></div></td>
+          <td><button type="button" class="btn btn-sec btn-sm" data-reset="${key}">↺</button></td></tr>`;
+      };
+      c.innerHTML = `<div class="alert">🔤 اختر لكل جزء من الموقع خطاً وحجماً ووزناً ولوناً خاصاً به. أي خانة تتركها على "افتراضي" تأخذ الإعدادات العامة من صفحة "الألوان والخطوط" (الخط العام حالياً: <b>${esc(base)}</b>). الأحجام على الموبايل تُصغَّر تلقائياً.</div>
+        ${TYPO_PARTS.map(([group, parts]) => `<div class="card"><div class="card-head"><h3>${group}</h3></div><div class="table-wrap"><table class="typo-table"><thead><tr><th>الجزء</th><th>الخط</th><th>الحجم</th><th>الوزن</th><th>اللون</th><th></th></tr></thead><tbody>${parts.map(([k, l]) => row(k, l)).join('')}</tbody></table></div></div>`).join('')}
+        <div class="save-bar"><button type="button" class="btn btn-sec" id="typoResetAll">إرجاع الكل للافتراضي</button><a class="btn btn-sec" href="/" target="_blank">${ICON.ext} معاينة المتجر</a><button type="button" class="btn" id="typoSave">💾 حفظ الخطوط</button></div>`;
+      const readRow = (tr) => {
+        const o = {};
+        $$('[data-t]', tr).forEach((el) => { const v = el.value.trim(); if (v) o[el.dataset.t] = el.dataset.t === 'size' ? Number(v) : v; });
+        return o;
+      };
+      const preview = (tr) => {
+        const t = readRow(tr);
+        const pv = $('[data-prev]', tr);
+        pv.style.fontFamily = `'${t.font || base}', sans-serif`;
+        pv.style.fontSize = t.size ? Math.min(t.size, 40) + 'px' : '';
+        pv.style.fontWeight = t.weight === 'bold' ? 700 : t.weight === 'normal' ? 400 : '';
+        pv.style.color = /^#[0-9a-f]{3,8}$/i.test(t.color || '') ? t.color : '';
+      };
+      $$('[data-row]', c).forEach((tr) => {
+        preview(tr);
+        tr.addEventListener('input', (e) => {
+          if (e.target.matches('[data-t-picker]')) $('[data-t="color"]', tr).value = e.target.value;
+          if (e.target.matches('[data-t="color"]') && /^#[0-9a-f]{6}$/i.test(e.target.value)) $('[data-t-picker]', tr).value = e.target.value;
+          preview(tr);
+        });
+        tr.addEventListener('change', () => preview(tr));
+      });
+      $$('[data-reset]', c).forEach((b) => (b.onclick = () => { const tr = b.closest('tr'); $$('[data-t]', tr).forEach((el) => (el.value = '')); preview(tr); }));
+      $('#typoResetAll').onclick = () => $$('[data-row]', c).forEach((tr) => { $$('[data-t]', tr).forEach((el) => (el.value = '')); preview(tr); });
+      $('#typoSave').onclick = async () => {
+        const out = {};
+        $$('[data-row]', c).forEach((tr) => { const t = readRow(tr); if (Object.keys(t).length) out[tr.dataset.row] = t; });
+        try {
+          A.settings = await api('/settings', 'PUT', { typography: out });
+          toast('✓ تم حفظ الخطوط – التغييرات ظاهرة الآن في المتجر');
+        } catch (e) { toast(e.message, 'err'); }
+      };
+    },
 
     contact: settingsPage([
       ['معلومات التواصل', [

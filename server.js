@@ -552,6 +552,10 @@ adm.put('/settings', auth(), (req, res) => {
   const defaults = defaultSettings();
   for (const k of keys) {
     if (!(k in defaults)) continue;
+    if (k === 'typography') {
+      db().settings.typography = cleanTypography(patch[k]);
+      continue;
+    }
     const v = patch[k];
     if (v && typeof v === 'object' && !Array.isArray(v)) db().settings[k] = { ...db().settings[k], ...v };
     else db().settings[k] = v;
@@ -559,6 +563,22 @@ adm.put('/settings', auth(), (req, res) => {
   store.save();
   res.json(db().settings);
 });
+
+// الخطوط لكل جزء: يُستبدل الكائن كاملاً حتى تُحذف الأجزاء التي أُعيدت للافتراضي
+function cleanTypography(v) {
+  const out = {};
+  for (const [key, t] of Object.entries(v && typeof v === 'object' ? v : {})) {
+    if (!/^\w{1,30}$/.test(key) || !t || typeof t !== 'object') continue;
+    const o = {};
+    const font = String(t.font || '').replace(/[^\w\s-]/g, '').trim().slice(0, 60);
+    if (font) o.font = font;
+    if (num(t.size) > 0) o.size = Math.min(120, Math.round(num(t.size)));
+    if (t.weight === 'bold' || t.weight === 'normal') o.weight = t.weight;
+    if (/^#[0-9a-f]{3,8}$/i.test(t.color || '')) o.color = t.color;
+    if (Object.keys(o).length) out[key] = o;
+  }
+  return out;
+}
 
 // المستخدمون
 adm.get('/users', auth('users'), (req, res) => res.json(db().users.map(safeUser)));
