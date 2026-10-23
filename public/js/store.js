@@ -8,6 +8,8 @@
     cart: load('jalil-cart', []),
     favs: load('jalil-favs', []),
     chat: load('jalil-chat', [], sessionStorage),
+    account: null, // بيانات حساب الزبون عند تسجيل الدخول
+    myOrders: load('jalil-my-orders', []), // طلبات هذا الجهاز [{number, phone}]
     sliderTimer: null,
   };
 
@@ -68,7 +70,7 @@
 
   async function api(path, opts = {}) {
     const res = await fetch('/api/public' + path, {
-      method: opts.body ? 'POST' : 'GET',
+      method: opts.method || (opts.body ? 'POST' : 'GET'),
       headers: opts.body ? { 'Content-Type': 'application/json' } : {},
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
@@ -204,7 +206,7 @@
     if (S.data.aiAvailable) links.push(['#/advisor', '🌿 ' + (s.ai.assistantName || 'المستشار')]);
     links.push(['#/about', 'من نحن'], ['#/contact', 'تواصل معنا']);
     $('#nav').innerHTML = links.map(([h, t, cls]) => `<a href="${h}" class="${cls || ''}">${esc(t)}</a>`).join('');
-    $('#mobileLinks').innerHTML = [...links, ['#/track', 'تتبع طلبك'], ['#/favorites', 'المفضلة']]
+    $('#mobileLinks').innerHTML = [...links, ['#/account', '👤 حسابي وطلباتي'], ['#/track', 'تتبع طلبك'], ['#/favorites', 'المفضلة']]
       .map(([h, t]) => `<a href="${h}">${esc(t)}</a>`).join('') +
       S.data.categories.slice(catLinks.length).map((c) => `<a href="#/shop?cat=${c.slug}">${esc(c.icon)} ${esc(c.name)}</a>`).join('');
 
@@ -239,7 +241,7 @@
           <div><h4>روابط</h4><ul>
             <li><a href="#/shop">جميع المنتجات</a></li><li><a href="#/shop?sale=1">العروض</a></li>
             ${S.data.aiAvailable ? `<li><a href="#/advisor">${esc(s.ai.assistantName)}</a></li>` : ''}
-            <li><a href="#/track">تتبع طلبك</a></li><li><a href="#/about">من نحن</a></li><li><a href="#/contact">تواصل معنا</a></li></ul></div>
+            <li><a href="#/account">طلباتي وحسابي</a></li><li><a href="#/track">تتبع طلبك</a></li><li><a href="#/about">من نحن</a></li><li><a href="#/contact">تواصل معنا</a></li></ul></div>
           <div><h4>تواصل معنا</h4><ul>
             ${c.phone ? `<li>📞 <a href="tel:${esc(c.phone)}" dir="ltr">${esc(c.phone)}</a></li>` : ''}
             ${c.whatsapp ? `<li>💬 <a href="${esc(waLink())}" target="_blank" rel="noopener">واتساب</a></li>` : ''}
@@ -376,6 +378,7 @@
     [/^\/track$/, pageTrack],
     [/^\/advisor$/, pageAdvisor],
     [/^\/favorites$/, pageFavorites],
+    [/^\/account$/, pageAccount],
     [/^\/about$/, pageAbout],
     [/^\/contact$/, pageContact],
   ];
@@ -389,6 +392,8 @@
   function router() {
     const { path, query } = parseHash();
     clearInterval(S.sliderTimer);
+    // تحديث الحساب كل دقيقة حتى يظهر إشعار العروض الجديدة دون إعادة تحميل الصفحة
+    if (S.account && path !== '/account' && Date.now() - (S.accountAt || 0) > 60000) refreshAccount();
     const app = $('#app');
     let handled = false;
     for (const [re, fn] of routes) {
@@ -676,7 +681,8 @@
       return;
     }
     const s = S.data.settings;
-    const saved = load('jalil-customer', {});
+    const acc = S.account ? S.account.customer : null;
+    const saved = acc ? { ...load('jalil-customer', {}), firstName: acc.firstName, lastName: acc.lastName, phone: acc.phone, town: acc.town || load('jalil-customer', {}).town, address: acc.address || load('jalil-customer', {}).address } : load('jalil-customer', {});
     const st = { coupon: '', couponDiscount: 0, location: null };
     app.innerHTML = `
       <section class="page-hero"><div class="container"><div class="crumbs"><a href="#/">الرئيسية</a> / إتمام الطلب</div><h1>إتمام الطلب</h1></div></section>
@@ -696,6 +702,14 @@
                 <input class="input" name="locationLink" placeholder="أو الصق رابط موقعك من Google Maps / Waze (اختياري)" style="margin-top:8px" dir="ltr" value="${esc(saved.locationLink || '')}"></div>
               <div class="field full"><label>ملاحظات للطلب</label><textarea class="textarea" name="notes" placeholder="مثال: الاتصال قبل الوصول، وقت مفضل للتوصيل…" maxlength="1000"></textarea></div>
             </div>
+          </div>
+          <div class="panel" style="margin-top:20px">
+            ${S.account ? `<div class="acct-note">👤 تطلب من حسابك باسم <b>${esc(S.account.customer.firstName)}</b> – سيظهر الطلب في صفحة <a href="#/account">طلباتي</a>.</div>
+              ${S.account.customer.marketing ? '' : '<label class="toggle-row"><input type="checkbox" name="marketing" id="mkChk"> أريد أن يصلني جديد المنتجات والعروض على واتساب</label>'}`
+            : `<h3>👤 تابع طلباتك بسهولة <small style="color:var(--muted);font-weight:400;font-size:.7em">(اختياري)</small></h3>
+              <label class="toggle-row"><input type="checkbox" id="acctChk"> أنشئ لي حساباً برقم هاتفي لمتابعة طلباتي</label>
+              <div class="field" id="acctPwBox" hidden style="max-width:340px;margin:6px 0 4px"><input class="input" type="password" id="acctPw" placeholder="اختر كلمة مرور (6 أحرف على الأقل)" autocomplete="new-password" dir="ltr"><div class="hint">تدخل لاحقاً برقم هاتفك وكلمة المرور هذه. <a href="#/account" style="color:var(--primary)">لديك حساب؟ سجّل الدخول</a></div></div>
+              <label class="toggle-row"><input type="checkbox" name="marketing" id="mkChk"> أريد أن يصلني جديد المنتجات والعروض والحملات على واتساب</label>`}
           </div>
           <div class="panel" style="margin-top:20px">
             <h3><span class="num">2</span> طريقة الدفع</h3>
@@ -736,6 +750,7 @@
         renderSummary();
       } catch (e) { toast(e.message, 'err'); }
     };
+    $('#acctChk')?.addEventListener('change', (e) => { $('#acctPwBox').hidden = !e.target.checked; if (e.target.checked) $('#acctPw').focus(); });
     $('#couponBtn').onclick = () => { const c = $('#couponIn').value.trim(); if (c) applyCoupon(c); };
     const pending = sessionStorage.getItem('jalil-coupon');
     if (pending) { $('#couponIn').value = pending; applyCoupon(pending); }
@@ -766,13 +781,17 @@
         f.classList.add('err'); f.insertAdjacentHTML('beforeend', `<div class="err-msg">${m}</div>`);
       }
       if (Object.keys(errs).length) { form.querySelector('.err .input').focus(); toast('يرجى تصحيح الحقول المطلوبة', 'err'); return; }
+      const wantAcct = $('#acctChk') && $('#acctChk').checked;
+      if (wantAcct && $('#acctPw').value.length < 6) { toast('اختر كلمة مرور للحساب من 6 أحرف على الأقل', 'err'); $('#acctPw').focus(); return; }
       if (!$('#confirmChk').checked) { toast('يرجى تأكيد صحة المعلومات', 'err'); return; }
       const btn = $('#placeBtn');
       btn.disabled = true; btn.textContent = 'جارٍ إرسال الطلب…';
       try {
-        const { notes, ...rest } = data;
+        const { notes, marketing, ...rest } = data;
         persist('jalil-customer', rest);
-        const r = await api('/orders', { body: { items: S.cart, coupon: st.coupon, customer: { ...data, location: st.location } } });
+        const r = await api('/orders', { body: { items: S.cart, coupon: st.coupon, marketing: Boolean($('#mkChk') && $('#mkChk').checked), createAccount: wantAcct ? { password: $('#acctPw').value } : null, customer: { ...data, location: st.location } } });
+        rememberOrder(r.number, data.phone);
+        if (r.accountCreated || S.account) await refreshAccount();
         const t = cartTotals(st.couponDiscount);
         persist('jalil-last-order', { number: r.number, total: r.total, phone: data.phone, items: t.lines.map((l) => ({ name: l.p.name, qty: l.qty })) }, sessionStorage);
         S.cart = []; saveCart();
@@ -799,7 +818,8 @@
       <p>${esc(T('orderSuccess'))}</p>
       ${o.total ? `<p><b>المبلغ للدفع عند الاستلام: ${money(o.total)}</b></p>` : ''}
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:20px">
-        <a class="btn" href="#/track?number=${esc(number)}&phone=${esc(o.phone || '')}">تتبع الطلب</a>
+        <a class="btn" href="#/account">📦 طلباتي</a>
+        <a class="btn btn-soft" href="#/track?number=${esc(number)}&phone=${esc(o.phone || '')}">تتبع هذا الطلب</a>
         ${wa ? `<a class="btn btn-wa" target="_blank" rel="noopener" href="${esc(wa)}">${ICON.wa} تواصل عبر واتساب</a>` : ''}
         <a class="btn btn-soft" href="#/shop">متابعة التسوق</a>
       </div></div></div>`;
@@ -1014,6 +1034,151 @@
     if ($('#chatLog')) renderChatLog();
   }
 
+  // ---------------------------------------------------------------- حسابي وطلباتي
+  function rememberOrder(number, phone) {
+    S.myOrders = [{ number, phone }, ...S.myOrders.filter((o) => o.number !== number)].slice(0, 30);
+    persist('jalil-my-orders', S.myOrders);
+  }
+
+  async function refreshAccount() {
+    S.accountAt = Date.now();
+    try { S.account = await api('/account'); } catch { S.account = null; }
+    updateAccountBadge();
+    return S.account;
+  }
+
+  // شارة على أيقونة الحساب عند وجود عروض جديدة لم يرها الزبون
+  function updateAccountBadge() {
+    const b = $('#acctBadge');
+    if (!b) return;
+    const seen = load('jalil-seen-campaigns', []);
+    const fresh = S.account ? S.account.campaigns.filter((k) => !seen.includes(k.id)).length : 0;
+    b.hidden = !fresh;
+    b.textContent = fresh;
+  }
+
+  const STATUS_STEPS = [['new', 'تم الاستلام'], ['confirmed', 'تم التأكيد'], ['preparing', 'قيد التحضير'], ['shipped', 'في الطريق'], ['delivered', 'تم التسليم']];
+
+  function orderCard(o) {
+    const idx = STATUS_STEPS.findIndex(([k]) => k === o.status);
+    return `<details class="order-card">
+      <summary>
+        <div><b>طلب #${o.number}</b><small>${new Date(o.createdAt).toLocaleDateString('ar-EG', { dateStyle: 'medium' })} • ${o.items.reduce((a, i) => a + i.qty, 0)} قطعة</small></div>
+        <span class="st-pill st-${esc(o.status)}">${esc(o.statusLabel)}</span>
+        <b class="order-total">${money(o.total)}</b>
+      </summary>
+      <div class="order-body">
+        ${o.status === 'cancelled' ? '<div class="warn-box">تم إلغاء هذا الطلب. للاستفسار تواصل معنا.</div>' : `<div class="steps">${STATUS_STEPS.map(([k, t], i) => `<div class="step ${i <= idx ? 'done' : ''}"><i>${i <= idx ? '✓' : i + 1}</i><span>${t}</span></div>`).join('')}</div>`}
+        <div class="order-items">${o.items.map((i) => `<div><img src="${esc(safeUrl(i.image))}" alt=""><span>${esc(i.name)} × ${i.qty}</span><b>${money(i.lineTotal)}</b></div>`).join('')}</div>
+        <div class="sum-row"><span>التوصيل</span><span>${o.shipping ? money(o.shipping) : 'مجاني'}</span></div>
+        <div class="sum-row total"><span>المبلغ عند الاستلام</span><span>${money(o.total)}</span></div>
+      </div></details>`;
+  }
+
+  function campaignCards(list) {
+    if (!list.length) return '';
+    return `<div class="camp-grid">${list.map((k) => `<article class="camp-card">${k.image ? `<img src="${esc(safeUrl(k.image))}" alt="">` : ''}<div><small>${new Date(k.createdAt).toLocaleDateString('ar-EG', { dateStyle: 'medium' })}</small><h4>${esc(k.title)}</h4><p>${esc(k.text).replace(/\n/g, '<br>')}</p>${k.link ? `<a class="btn btn-sm" href="${esc(safeUrl(k.link))}">${esc(k.linkText || 'شاهد الآن')}</a>` : ''}</div></article>`).join('')}</div>`;
+  }
+
+  async function pageAccount(app) {
+    app.innerHTML = `<section class="page-hero"><div class="container"><h1>👤 حسابي وطلباتي</h1></div></section><div class="container" style="padding-bottom:80px" id="acctBox"><div class="skeleton" style="height:200px"></div></div>`;
+    await refreshAccount();
+    const box = $('#acctBox');
+    if (!box) return;
+    if (S.account) return renderLoggedIn(box);
+
+    // زائر: طلبات هذا الجهاز + دخول / إنشاء حساب
+    let local = { orders: [], campaigns: [] };
+    if (S.myOrders.length) { try { local = await api('/my-orders', { body: { refs: S.myOrders } }); } catch { /* تجاهل */ } }
+    box.innerHTML = `<div class="acct-layout">
+      <div>
+        <div class="panel"><h3>📦 طلباتك على هذا الجهاز</h3>
+          ${local.orders.length ? `<div class="orders-list">${local.orders.map(orderCard).join('')}</div>` : '<p style="color:var(--muted)">لا توجد طلبات محفوظة على هذا الجهاز. إذا طلبت من جهاز آخر، استعمل <a href="#/track" style="color:var(--primary)">تتبع الطلب</a> أو سجّل الدخول لحسابك.</p>'}
+        </div>
+      </div>
+      <div class="panel acct-auth">
+        <div class="tab-btns"><button class="on" data-auth="login">تسجيل الدخول</button><button data-auth="register">حساب جديد</button></div>
+        <form id="loginForm" class="auth-form">
+          <p style="color:var(--muted);margin:0">ادخل برقم هاتفك لمتابعة كل طلباتك والعروض الخاصة بك.</p>
+          ${field('phone', 'رقم الهاتف', load('jalil-customer', {}).phone, true, 'tel', '05XXXXXXXX', 'dir="ltr" inputmode="tel" autocomplete="tel"')}
+          ${field('password', 'كلمة المرور', '', true, 'password', '', 'dir="ltr" autocomplete="current-password"')}
+          <button class="btn btn-block">دخول</button>
+        </form>
+        <form id="regForm" class="auth-form" hidden>
+          <p style="color:var(--muted);margin:0">الحساب اختياري: يحفظ كل طلباتك في مكان واحد، ويوصلك جديد المنتجات والعروض.</p>
+          <div class="form-grid">${field('firstName', 'الاسم', load('jalil-customer', {}).firstName, true)}${field('lastName', 'العائلة', load('jalil-customer', {}).lastName, true)}</div>
+          ${field('phone', 'رقم الهاتف', load('jalil-customer', {}).phone, true, 'tel', '05XXXXXXXX', 'dir="ltr" inputmode="tel" autocomplete="tel"')}
+          ${field('town', 'البلدة', load('jalil-customer', {}).town, false)}
+          ${field('password', 'كلمة المرور (6 أحرف على الأقل)', '', true, 'password', '', 'dir="ltr" autocomplete="new-password"')}
+          <label class="toggle-row"><input type="checkbox" name="marketing" checked> أريد أن يصلني جديد المنتجات والعروض والحملات على واتساب</label>
+          <button class="btn btn-block">إنشاء الحساب</button>
+        </form>
+      </div></div>`;
+    $$('[data-auth]', box).forEach((b) => (b.onclick = () => {
+      $$('[data-auth]', box).forEach((x) => x.classList.toggle('on', x === b));
+      $('#loginForm').hidden = b.dataset.auth !== 'login';
+      $('#regForm').hidden = b.dataset.auth !== 'register';
+    }));
+    const submit = (form, path) => (form.onsubmit = async (e) => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(form));
+      d.phone = normPhone(d.phone);
+      d.marketing = Boolean(form.querySelector('[name=marketing]')?.checked);
+      const btn = form.querySelector('button');
+      btn.disabled = true;
+      try {
+        S.account = await api(path, { body: d });
+        // ربط طلبات هذا الجهاز بنفس الرقم تلقائياً
+        for (const ref of S.myOrders.filter((x) => x.phone === d.phone)) { try { S.account = await api('/account/link-order', { body: ref }); } catch { /* مرتبط مسبقاً */ } }
+        toast(path.endsWith('register') ? '🎉 تم إنشاء حسابك' : 'أهلاً بعودتك 🌿');
+        updateAccountBadge();
+        renderLoggedIn(box);
+      } catch (err) { toast(err.message, 'err'); btn.disabled = false; }
+    });
+    submit($('#loginForm'), '/account/login');
+    submit($('#regForm'), '/account/register');
+  }
+
+  function renderLoggedIn(box) {
+    const { customer: c, orders, campaigns } = S.account;
+    const seen = load('jalil-seen-campaigns', []);
+    persist('jalil-seen-campaigns', [...new Set([...seen, ...campaigns.map((k) => k.id)])]);
+    updateAccountBadge();
+    box.innerHTML = `<div class="acct-hello panel"><span class="avatar" style="width:56px;height:56px;font-size:1.4em">${esc(c.firstName[0] || '؟')}</span>
+        <div><h3 style="margin:0">أهلاً ${esc(c.firstName)} 🌿</h3><small style="color:var(--muted)" dir="ltr">${esc(c.phone)}</small></div>
+        <button class="btn btn-soft btn-sm" id="logoutBtn" style="margin-inline-start:auto">تسجيل الخروج</button></div>
+      <div class="acct-layout">
+        <div>
+          <div class="panel"><h3>📦 طلباتي (${orders.length})</h3>
+            ${orders.length ? `<div class="orders-list">${orders.map(orderCard).join('')}</div>` : '<p style="color:var(--muted)">لا توجد طلبات في حسابك بعد. <a href="#/shop" style="color:var(--primary)">ابدأ التسوق</a></p>'}
+            <details style="margin-top:12px"><summary style="cursor:pointer;color:var(--primary);font-weight:700">طلبت قبل إنشاء الحساب؟ أضف الطلب لحسابك</summary>
+              <form id="linkForm" class="form-grid" style="margin-top:10px">${field('number', 'رقم الطلب', '', true, 'text', '1001', 'dir="ltr" inputmode="numeric"')}${field('phone', 'رقم الهاتف المستعمل بالطلب', c.phone, true, 'tel', '', 'dir="ltr"')}<button class="btn btn-sm">إضافة</button></form></details>
+          </div>
+          ${campaigns.length ? `<div class="panel" style="margin-top:20px"><h3>🎁 جديدنا وعروضنا</h3>${campaignCards(campaigns)}</div>` : ''}
+        </div>
+        <form class="panel" id="profileForm"><h3>⚙️ بياناتي</h3>
+          <div class="form-grid">${field('firstName', 'الاسم', c.firstName, true)}${field('lastName', 'العائلة', c.lastName, true)}</div>
+          ${field('town', 'البلدة', c.town, false)}${field('address', 'العنوان', c.address, false)}
+          <label class="toggle-row" style="margin:10px 0"><input type="checkbox" name="marketing" ${c.marketing ? 'checked' : ''}> أريد أن يصلني جديد المنتجات والعروض على واتساب</label>
+          <details><summary style="cursor:pointer;color:var(--primary);font-weight:700">تغيير كلمة المرور</summary>
+            ${field('current', 'كلمة المرور الحالية', '', false, 'password', '', 'dir="ltr" autocomplete="current-password"')}${field('password', 'كلمة المرور الجديدة', '', false, 'password', '', 'dir="ltr" autocomplete="new-password"')}</details>
+          <button class="btn btn-block" style="margin-top:14px">حفظ</button>
+        </form>
+      </div>`;
+    $('#logoutBtn').onclick = async () => { await api('/account/logout', { body: {} }).catch(() => {}); S.account = null; updateAccountBadge(); toast('تم تسجيل الخروج'); pageAccount($('#app')); };
+    $('#profileForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(e.target));
+      d.marketing = e.target.querySelector('[name=marketing]').checked;
+      try { S.account = await api('/account', { method: 'PUT', body: d }); toast('✓ تم حفظ بياناتك'); renderLoggedIn(box); } catch (err) { toast(err.message, 'err'); }
+    };
+    $('#linkForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(e.target));
+      try { S.account = await api('/account/link-order', { body: { number: d.number.replace(/\D/g, ''), phone: normPhone(d.phone) } }); toast('✓ تمت إضافة الطلب لحسابك'); renderLoggedIn(box); } catch (err) { toast(err.message, 'err'); }
+    };
+  }
+
   // ---------------------------------------------------------------- صفحات أخرى
   function pageFavorites(app) {
     const list = S.favs.map(product).filter(Boolean);
@@ -1165,6 +1330,7 @@
       return;
     }
     S.cart = S.cart.filter((i) => product(i.id));
+    refreshAccount();
     applyTheme();
     renderShell();
     bindGlobal();

@@ -48,7 +48,7 @@ function deepMerge(target, src) {
 function migrateSettings() {
   const merged = deepMerge(defaultSettings(), db().settings);
   db().settings = merged;
-  for (const key of ['coupons', 'orders', 'blendRequests', 'reviews', 'slides', 'users']) db()[key] = db()[key] || [];
+  for (const key of ['coupons', 'orders', 'blendRequests', 'reviews', 'slides', 'users', 'customers', 'campaigns']) db()[key] = db()[key] || [];
   store.save();
 }
 
@@ -161,6 +161,37 @@ function setCookie(req, res, value, maxAge) {
   res.setHeader('Set-Cookie', `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`);
 }
 
+// ---------------------------------------------------------------- حسابات الزبائن (اختيارية)
+const CUSTOMER_COOKIE = 'jalil_customer';
+const CUSTOMER_DAYS = 180;
+
+function issueCustomerToken(c) {
+  const payload = Buffer.from(JSON.stringify({ cid: c.id, v: c.hash.slice(0, 12), exp: Date.now() + CUSTOMER_DAYS * 864e5 })).toString('base64url');
+  return payload + '.' + sign('customer:' + payload);
+}
+
+function readCustomer(req) {
+  const raw = (req.headers.cookie || '').split(';').map((c) => c.trim()).find((c) => c.startsWith(CUSTOMER_COOKIE + '='));
+  if (!raw) return null;
+  const [payload, sig] = raw.slice(CUSTOMER_COOKIE.length + 1).split('.');
+  if (!payload || !sig) return null;
+  const expected = sign('customer:' + payload);
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    if (data.exp < Date.now()) return null;
+    const c = db().customers.find((x) => x.id === data.cid && x.active !== false);
+    return c && c.hash.slice(0, 12) === data.v ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+function setCustomerCookie(req, res, value, maxAge) {
+  const secure = req.secure ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${CUSTOMER_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`);
+}
+
 const ROLES = {
   owner: ['orders', 'catalog', 'content', 'settings', 'users'],
   admin: ['orders', 'catalog', 'content', 'settings'],
@@ -248,7 +279,22 @@ api.post('/orders', rateLimiter(10, 3600e3), (req, res) => {
   const minOrder = num(db().settings.shop.minOrder);
   if (minOrder && priced.total - priced.shipping < minOrder) errors.push(`الحد الأدنى للطلب ${minOrder} ₪`);
   for (const l of priced.lines) if (l.qty > l.stock) errors.push(`الكمية المتوفرة من "${l.name}" هي ${l.stock} فقط`);
+  const account = readCustomer(req);
+  const newPassword = !account && b.createAccount ? String(b.createAccount.password || '') : '';
+  if (newPassword) {
+    if (newPassword.length < 6) errors.push('كلمة مرور الحساب يجب أن تكون 6 أحرف على الأقل');
+    else if (db().customers.some((x) => x.phone === customer.phone)) errors.push('يوجد حساب بهذا الرقم، سجّل الدخول من صفحة "حسابي" أو ألغِ خيار إنشاء الحساب');
+  }
   if (errors.length) return res.status(400).json({ error: errors.join(' • '), errors });
+
+  let owner = account;
+  if (newPassword) {
+    owner = { id: store.id('cu_'), firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone, town: customer.town, address: customer.address, marketing: bool(b.marketing), active: true, ...hashPassword(newPassword), createdAt: Date.now() };
+    db().customers.push(owner);
+    setCustomerCookie(req, res, issueCustomerToken(owner), CUSTOMER_DAYS * 86400);
+  } else if (owner && b.marketing !== undefined && bool(b.marketing)) {
+    owner.marketing = true;
+  }
 
   const number = store.nextNumber('order', 1000);
   const order = {
@@ -257,6 +303,7 @@ api.post('/orders', rateLimiter(10, 3600e3), (req, res) => {
     subtotal: priced.subtotal, productDiscount: priced.productDiscount, couponCode: priced.couponCode, couponDiscount: priced.couponDiscount,
     shipping: priced.shipping, total: priced.total, payment: 'cod', status: 'new', seen: false, adminNote: '',
     source: str(b.source, 30) || 'store', createdAt: Date.now(), history: [{ status: 'new', at: Date.now() }],
+    customerId: owner ? owner.id : null, marketing: bool(b.marketing),
   };
   db().orders.push(order);
   for (const l of priced.lines) {
@@ -265,7 +312,7 @@ api.post('/orders', rateLimiter(10, 3600e3), (req, res) => {
     p.sold = (p.sold || 0) + l.qty;
   }
   store.save();
-  res.json({ ok: true, number, total: order.total });
+  res.json({ ok: true, number, total: order.total, accountCreated: Boolean(newPassword) });
 });
 
 const round6 = (n) => Math.round(Number(n) * 1e6) / 1e6;
@@ -308,6 +355,104 @@ api.post('/blend-requests', rateLimiter(8, 3600e3), (req, res) => {
   db().blendRequests.push({ id: store.id('b_'), number, customer, blend, conversation, status: 'new', seen: false, adminNote: '', price: 0, createdAt: Date.now() });
   store.save();
   res.json({ ok: true, number });
+});
+
+// ---------------------------------------------------------------- حساب الزبون: طلباتي والعروض
+const publicCustomer = (c) => ({ id: c.id, firstName: c.firstName, lastName: c.lastName, phone: c.phone, town: c.town || '', address: c.address || '', marketing: Boolean(c.marketing), createdAt: c.createdAt });
+const orderSummary = (o) => ({
+  number: o.number, status: o.status, statusLabel: STATUS[o.status], createdAt: o.createdAt, total: o.total, shipping: o.shipping,
+  items: o.items.map((i) => ({ name: i.name, qty: i.qty, image: i.image, lineTotal: i.lineTotal })), history: o.history,
+});
+const activeCampaigns = () => db().campaigns.filter((k) => k.active).sort((a, b) => b.createdAt - a.createdAt).slice(0, 20)
+  .map(({ id, title, text, image, link, linkText, createdAt }) => ({ id, title, text, image, link, linkText, createdAt }));
+
+function accountPayload(c) {
+  return {
+    customer: publicCustomer(c),
+    orders: db().orders.filter((o) => o.customerId === c.id).sort((a, b) => b.createdAt - a.createdAt).map(orderSummary),
+    campaigns: activeCampaigns(),
+  };
+}
+
+const accountLimiter = rateLimiter(15, 15 * 60e3);
+
+api.post('/account/register', accountLimiter, (req, res) => {
+  const b = req.body || {};
+  const phone = normPhone(b.phone);
+  const c = { firstName: str(b.firstName, 60), lastName: str(b.lastName, 60), town: str(b.town, 80) };
+  if (!c.firstName || !c.lastName) return res.status(400).json({ error: 'يرجى كتابة الاسم والعائلة' });
+  if (!PHONE_RE.test(phone)) return res.status(400).json({ error: 'رقم الهاتف غير صحيح (مثال: 0501234567)' });
+  if (String(b.password || '').length < 6) return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+  if (db().customers.some((x) => x.phone === phone)) return res.status(400).json({ error: 'هذا الرقم مسجّل مسبقاً، سجّل الدخول بدلاً من ذلك' });
+  const cust = { id: store.id('cu_'), ...c, phone, address: '', marketing: bool(b.marketing), active: true, ...hashPassword(String(b.password)), createdAt: Date.now() };
+  db().customers.push(cust);
+  store.save();
+  setCustomerCookie(req, res, issueCustomerToken(cust), CUSTOMER_DAYS * 86400);
+  res.json(accountPayload(cust));
+});
+
+api.post('/account/login', accountLimiter, (req, res) => {
+  const phone = normPhone(req.body.phone);
+  const c = db().customers.find((x) => x.phone === phone && x.active !== false);
+  const ok = c && crypto.timingSafeEqual(Buffer.from(hashPassword(String(req.body.password || ''), c.salt).hash, 'hex'), Buffer.from(c.hash, 'hex'));
+  if (!ok) return res.status(401).json({ error: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
+  c.lastLogin = Date.now();
+  store.save();
+  setCustomerCookie(req, res, issueCustomerToken(c), CUSTOMER_DAYS * 86400);
+  res.json(accountPayload(c));
+});
+
+api.post('/account/logout', (req, res) => {
+  setCustomerCookie(req, res, '', 0);
+  res.json({ ok: true });
+});
+
+api.get('/account', (req, res) => {
+  const c = readCustomer(req);
+  if (!c) return res.status(401).json({ error: 'غير مسجّل' });
+  res.json(accountPayload(c));
+});
+
+api.put('/account', (req, res) => {
+  const c = readCustomer(req);
+  if (!c) return res.status(401).json({ error: 'غير مسجّل' });
+  const b = req.body || {};
+  if (b.firstName !== undefined) c.firstName = str(b.firstName, 60) || c.firstName;
+  if (b.lastName !== undefined) c.lastName = str(b.lastName, 60) || c.lastName;
+  if (b.town !== undefined) c.town = str(b.town, 80);
+  if (b.address !== undefined) c.address = str(b.address, 300);
+  if (b.marketing !== undefined) c.marketing = bool(b.marketing);
+  if (b.password) {
+    if (hashPassword(String(b.current || ''), c.salt).hash !== c.hash) return res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
+    if (String(b.password).length < 6) return res.status(400).json({ error: 'كلمة المرور 6 أحرف على الأقل' });
+    Object.assign(c, hashPassword(String(b.password)));
+    setCustomerCookie(req, res, issueCustomerToken(c), CUSTOMER_DAYS * 86400);
+  }
+  store.save();
+  res.json(accountPayload(c));
+});
+
+// ربط طلب قديم بالحساب: يجب معرفة رقم الطلب ورقم الهاتف معاً
+api.post('/account/link-order', accountLimiter, (req, res) => {
+  const c = readCustomer(req);
+  if (!c) return res.status(401).json({ error: 'غير مسجّل' });
+  const o = db().orders.find((x) => x.number === Math.floor(num(req.body.number)) && x.customer.phone === normPhone(req.body.phone));
+  if (!o) return res.status(404).json({ error: 'لم يتم العثور على طلب بهذا الرقم وهذا الهاتف' });
+  if (o.customerId && o.customerId !== c.id) return res.status(400).json({ error: 'هذا الطلب مرتبط بحساب آخر' });
+  o.customerId = c.id;
+  store.save();
+  res.json(accountPayload(c));
+});
+
+// طلبات محفوظة على جهاز الزبون (بدون حساب): نرجع فقط الطلبات التي يطابق فيها الرقم والهاتف
+api.post('/my-orders', rateLimiter(60, 600e3), (req, res) => {
+  const refs = (Array.isArray(req.body.refs) ? req.body.refs : []).slice(0, 30);
+  const out = [];
+  for (const r of refs) {
+    const o = db().orders.find((x) => x.number === Math.floor(num(r.number)) && x.customer.phone === normPhone(r.phone));
+    if (o) out.push(orderSummary(o));
+  }
+  res.json({ orders: out.sort((a, b) => b.createdAt - a.createdAt), campaigns: activeCampaigns().slice(0, 3) });
 });
 
 app.use('/api/public', api);
@@ -579,6 +724,54 @@ function cleanTypography(v) {
   }
   return out;
 }
+
+// الزبائن: أصحاب الحسابات + كل من طلب (مجمّعين حسب رقم الهاتف)
+adm.get('/customers', auth('orders'), (req, res) => {
+  const map = new Map();
+  for (const c of db().customers) {
+    map.set(c.phone, { phone: c.phone, name: `${c.firstName} ${c.lastName}`, town: c.town || '', account: true, marketing: Boolean(c.marketing), orders: 0, spent: 0, lastOrderAt: 0, createdAt: c.createdAt, customerId: c.id });
+  }
+  for (const o of db().orders) {
+    const p = o.customer.phone;
+    const e = map.get(p) || { phone: p, name: `${o.customer.firstName} ${o.customer.lastName}`, town: o.customer.town, account: false, marketing: false, orders: 0, spent: 0, lastOrderAt: 0, createdAt: o.createdAt };
+    e.orders++;
+    if (o.status !== 'cancelled') e.spent = round2(e.spent + o.total);
+    e.lastOrderAt = Math.max(e.lastOrderAt, o.createdAt);
+    if (!e.account && o.marketing) e.marketing = true;
+    map.set(p, e);
+  }
+  res.json([...map.values()].sort((a, b) => (b.lastOrderAt || b.createdAt) - (a.lastOrderAt || a.createdAt)));
+});
+
+adm.put('/customers/:phone', auth('orders'), (req, res) => {
+  const phone = normPhone(req.params.phone);
+  const c = db().customers.find((x) => x.phone === phone);
+  if (c) c.marketing = bool(req.body.marketing);
+  // إلغاء الاشتراك لزبون بدون حساب: نزيل الموافقة من طلباته
+  if (!bool(req.body.marketing)) db().orders.forEach((o) => { if (o.customer.phone === phone) o.marketing = false; });
+  store.save();
+  res.json({ ok: true });
+});
+
+crud('campaigns', 'content', (b, old) => {
+  const title = str(b.title, 150);
+  if (!title) throw new Error('عنوان الحملة مطلوب');
+  return {
+    id: old ? old.id : store.id('m_'), title, text: str(b.text, 3000), image: str(b.image, 500), link: str(b.link, 400), linkText: str(b.linkText, 60),
+    active: bool(b.active), createdAt: old ? old.createdAt : Date.now(), sentTo: old ? old.sentTo || [] : [],
+  };
+});
+
+// تعليم زبون بأنه أُرسلت له الحملة على واتساب
+adm.post('/campaigns/:id/sent', auth('content'), (req, res) => {
+  const k = db().campaigns.find((x) => x.id === req.params.id);
+  if (!k) return res.status(404).json({ error: 'غير موجود' });
+  const phone = normPhone(req.body.phone);
+  k.sentTo = k.sentTo || [];
+  if (bool(req.body.sent)) { if (!k.sentTo.includes(phone)) k.sentTo.push(phone); } else k.sentTo = k.sentTo.filter((x) => x !== phone);
+  store.save();
+  res.json(k);
+});
 
 // المستخدمون
 adm.get('/users', auth('users'), (req, res) => res.json(db().users.map(safeUser)));

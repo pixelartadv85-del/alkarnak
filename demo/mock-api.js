@@ -2,8 +2,9 @@
 // يُحقن قبل store.js / admin.js بواسطة scripts/build-demo.js، ويحتاج window.__DEMO_SEED__.
 (() => {
   'use strict';
-  const KEY = 'jalil-demo-db-v1';
+  const KEY = 'jalil-demo-db-v2';
   const SESSION = 'jalil-demo-session';
+  const CSESSION = 'jalil-demo-customer';
   const round2 = (n) => Math.round(n * 100) / 100;
   const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
   const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
@@ -19,6 +20,8 @@
     if (mem) return mem;
     try { mem = JSON.parse(localStorage.getItem(KEY)); } catch { mem = null; }
     if (!mem) mem = JSON.parse(JSON.stringify(window.__DEMO_SEED__));
+    mem.customers = mem.customers || [];
+    mem.campaigns = mem.campaigns || [];
     return mem;
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch { /* التخزين ممتلئ أو غير متاح */ } }
@@ -89,6 +92,11 @@
     };
   }
 
+  const getCustomer = () => { try { const id = localStorage.getItem(CSESSION); return db().customers.find((c) => c.id === id) || null; } catch { return null; } };
+  const setCustomer = (c) => { try { if (c) localStorage.setItem(CSESSION, c.id); else localStorage.removeItem(CSESSION); } catch { /* تجاهل */ } };
+  const orderSummary = (o) => ({ number: o.number, status: o.status, statusLabel: STATUS[o.status], createdAt: o.createdAt, total: o.total, shipping: o.shipping, items: o.items.map((i) => ({ name: i.name, qty: i.qty, image: i.image, lineTotal: i.lineTotal })), history: o.history });
+  const activeCampaigns = () => db().campaigns.filter((k) => k.active).sort((a, b) => b.createdAt - a.createdAt);
+  const accountPayload = (c) => ({ customer: { id: c.id, firstName: c.firstName, lastName: c.lastName, phone: c.phone, town: c.town || '', address: c.address || '', marketing: !!c.marketing }, orders: db().orders.filter((o) => o.customerId === c.id).sort((a, b) => b.createdAt - a.createdAt).map(orderSummary), campaigns: activeCampaigns() });
   const me = () => { try { const id = sessionStorage.getItem(SESSION); return db().users.find((u) => u.id === id && u.active) || null; } catch { return null; } };
   const safeUser = (u) => ({ id: u.id, username: u.username, name: u.name, role: u.role, active: u.active, permissions: ROLES[u.role] || [] });
 
@@ -98,6 +106,10 @@
   const lines = (v) => (Array.isArray(v) ? v : String(v || '').split('\n')).map((x) => str(x, 300)).filter(Boolean);
   const slug = (s) => String(s).trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '') || uid('');
   const CLEAN = {
+    campaigns: (b, old) => {
+      if (!str(b.title)) throw new HttpError(400, 'عنوان الحملة مطلوب');
+      return { id: old ? old.id : uid('m_'), title: str(b.title, 150), text: str(b.text, 3000), image: str(b.image, 2e6), link: str(b.link, 400), linkText: str(b.linkText, 60), active: bool(b.active), createdAt: old ? old.createdAt : Date.now(), sentTo: old ? old.sentTo || [] : [] };
+    },
     products: (b, old) => {
       if (!str(b.name)) throw new HttpError(400, 'اسم المنتج مطلوب');
       return { ...(old || { createdAt: Date.now(), sold: 0, id: uid('p_') }), name: str(b.name, 150), slug: old ? old.slug : slug(b.name), categoryId: str(b.categoryId), price: Math.max(0, num(b.price)), discount: Math.max(0, Math.min(100, num(b.discount))), stock: Math.max(0, Math.floor(num(b.stock))), size: str(b.size), images: (b.images || []).filter(Boolean).slice(0, 10), shortDesc: str(b.shortDesc), description: str(b.description, 5000), benefits: lines(b.benefits), usage: str(b.usage, 2000), ingredients: str(b.ingredients, 2000), warnings: str(b.warnings, 2000), featured: bool(b.featured), bestseller: bool(b.bestseller), isNew: bool(b.isNew), active: bool(b.active) };
@@ -144,11 +156,16 @@
       const pr = priceCart(body.items, body.coupon);
       if (!pr.lines.length) errs.push('السلة فارغة');
       for (const l of pr.lines) if (l.qty > l.stock) errs.push(`الكمية المتوفرة من "${l.name}" هي ${l.stock} فقط`);
+      let owner = getCustomer();
+      const pw = !owner && body.createAccount ? String(body.createAccount.password || '') : '';
+      if (pw && d.customers.some((x) => x.phone === customer.phone)) errs.push('يوجد حساب بهذا الرقم، سجّل الدخول من صفحة "حسابي"');
       if (errs.length) throw new HttpError(400, errs.join(' • '));
+      if (pw) { owner = { id: uid('cu_'), firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone, town: customer.town, address: customer.address, marketing: bool(body.marketing), password: pw, createdAt: Date.now() }; d.customers.push(owner); setCustomer(owner); }
+      else if (owner && bool(body.marketing)) owner.marketing = true;
       const number = nextNumber('order', 1000);
-      d.orders.push({ id: uid('o_'), number, customer, items: pr.lines.map(({ stock, ...l }) => l), subtotal: pr.subtotal, productDiscount: pr.productDiscount, couponCode: pr.couponCode, couponDiscount: pr.couponDiscount, shipping: pr.shipping, total: pr.total, payment: 'cod', status: 'new', seen: false, adminNote: '', createdAt: Date.now(), history: [{ status: 'new', at: Date.now() }] });
+      d.orders.push({ id: uid('o_'), number, customer, items: pr.lines.map(({ stock, ...l }) => l), subtotal: pr.subtotal, productDiscount: pr.productDiscount, couponCode: pr.couponCode, couponDiscount: pr.couponDiscount, shipping: pr.shipping, total: pr.total, payment: 'cod', status: 'new', seen: false, adminNote: '', createdAt: Date.now(), history: [{ status: 'new', at: Date.now() }], customerId: owner ? owner.id : null, marketing: bool(body.marketing) });
       for (const l of pr.lines) { const p = d.products.find((x) => x.id === l.productId); p.stock = Math.max(0, p.stock - l.qty); p.sold = (p.sold || 0) + l.qty; }
-      save(); return { ok: true, number, total: pr.total };
+      save(); return { ok: true, number, total: pr.total, accountCreated: !!pw };
     }
     if (path === '/public/track') {
       const o = d.orders.find((x) => x.number === Math.floor(num(q.get('number'))) && x.customer.phone === normPhone(q.get('phone')));
@@ -156,6 +173,43 @@
       return { number: o.number, status: o.status, statusLabel: STATUS[o.status], createdAt: o.createdAt, total: o.total, items: o.items.map((i) => ({ name: i.name, qty: i.qty })), history: o.history };
     }
     if (path === '/public/chat') return demoChat(body.messages || []);
+    if (path === '/public/account/register') {
+      const phone = normPhone(body.phone);
+      if (!str(body.firstName) || !str(body.lastName)) throw new HttpError(400, 'يرجى كتابة الاسم والعائلة');
+      if (!PHONE_RE.test(phone)) throw new HttpError(400, 'رقم الهاتف غير صحيح');
+      if (String(body.password || '').length < 6) throw new HttpError(400, 'كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+      if (d.customers.some((x) => x.phone === phone)) throw new HttpError(400, 'هذا الرقم مسجّل مسبقاً، سجّل الدخول بدلاً من ذلك');
+      const c = { id: uid('cu_'), firstName: str(body.firstName, 60), lastName: str(body.lastName, 60), town: str(body.town, 80), address: '', phone, marketing: bool(body.marketing), password: String(body.password), createdAt: Date.now() };
+      d.customers.push(c); setCustomer(c); save(); return accountPayload(c);
+    }
+    if (path === '/public/account/login') {
+      const c = d.customers.find((x) => x.phone === normPhone(body.phone) && x.password === String(body.password || ''));
+      if (!c) throw new HttpError(401, 'رقم الهاتف أو كلمة المرور غير صحيحة');
+      setCustomer(c); return accountPayload(c);
+    }
+    if (path === '/public/account/logout') { setCustomer(null); return { ok: true }; }
+    if (path === '/public/account') {
+      const c = getCustomer();
+      if (!c) throw new HttpError(401, 'غير مسجّل');
+      if (method === 'PUT') {
+        for (const k of ['firstName', 'lastName', 'town', 'address']) if (body[k] !== undefined) c[k] = str(body[k], 300) || c[k];
+        if (body.marketing !== undefined) c.marketing = bool(body.marketing);
+        if (body.password) { if (body.current !== c.password) throw new HttpError(400, 'كلمة المرور الحالية غير صحيحة'); c.password = String(body.password); }
+        save();
+      }
+      return accountPayload(c);
+    }
+    if (path === '/public/account/link-order') {
+      const c = getCustomer();
+      if (!c) throw new HttpError(401, 'غير مسجّل');
+      const o = d.orders.find((x) => x.number === Math.floor(num(body.number)) && x.customer.phone === normPhone(body.phone));
+      if (!o) throw new HttpError(404, 'لم يتم العثور على طلب بهذا الرقم وهذا الهاتف');
+      o.customerId = c.id; save(); return accountPayload(c);
+    }
+    if (path === '/public/my-orders') {
+      const out = (body.refs || []).map((r) => d.orders.find((x) => x.number === Math.floor(num(r.number)) && x.customer.phone === normPhone(r.phone))).filter(Boolean).map(orderSummary);
+      return { orders: out.sort((a, b) => b.createdAt - a.createdAt), campaigns: activeCampaigns().slice(0, 3) };
+    }
     if (path === '/public/blend-requests') {
       const c = body.customer || {};
       const customer = { firstName: str(c.firstName, 60), lastName: str(c.lastName, 60), town: str(c.town, 80), phone: normPhone(c.phone), notes: str(c.notes, 1000) };
@@ -219,6 +273,33 @@
       if ('seen' in body) o.seen = bool(body.seen);
       save(); return o;
     }
+    if (path === '/admin/customers') {
+      need('orders');
+      const map = new Map();
+      for (const c of d.customers) map.set(c.phone, { phone: c.phone, name: `${c.firstName} ${c.lastName}`, town: c.town || '', account: true, marketing: !!c.marketing, orders: 0, spent: 0, lastOrderAt: 0, createdAt: c.createdAt });
+      for (const o of d.orders) {
+        const e = map.get(o.customer.phone) || { phone: o.customer.phone, name: `${o.customer.firstName} ${o.customer.lastName}`, town: o.customer.town, account: false, marketing: false, orders: 0, spent: 0, lastOrderAt: 0, createdAt: o.createdAt };
+        e.orders++; if (o.status !== 'cancelled') e.spent = round2(e.spent + o.total); e.lastOrderAt = Math.max(e.lastOrderAt, o.createdAt);
+        if (!e.account && o.marketing) e.marketing = true;
+        map.set(o.customer.phone, e);
+      }
+      return [...map.values()].sort((a, b) => (b.lastOrderAt || b.createdAt) - (a.lastOrderAt || a.createdAt));
+    }
+    if ((m = path.match(/^\/admin\/customers\/(.+)$/))) {
+      need('orders');
+      const phone = normPhone(decodeURIComponent(m[1]));
+      const c = d.customers.find((x) => x.phone === phone);
+      if (c) c.marketing = bool(body.marketing);
+      if (!bool(body.marketing)) d.orders.forEach((o) => { if (o.customer.phone === phone) o.marketing = false; });
+      save(); return { ok: true };
+    }
+    if ((m = path.match(/^\/admin\/campaigns\/([^/]+)\/sent$/))) {
+      need('content');
+      const k = d.campaigns.find((x) => x.id === m[1]);
+      k.sentTo = k.sentTo || [];
+      if (!k.sentTo.includes(normPhone(body.phone))) k.sentTo.push(normPhone(body.phone));
+      save(); return k;
+    }
     if (path === '/admin/blends') { need('orders'); return d.blendRequests.slice().reverse(); }
     if ((m = path.match(/^\/admin\/blends\/(.+)$/))) {
       need('orders');
@@ -230,9 +311,9 @@
       if ('seen' in body) b.seen = bool(body.seen);
       save(); return b;
     }
-    if ((m = path.match(/^\/admin\/(products|categories|slides|coupons)(?:\/(.+))?$/))) {
+    if ((m = path.match(/^\/admin\/(products|categories|slides|coupons|campaigns)(?:\/(.+))?$/))) {
       const [, coll, id] = m;
-      need(coll === 'coupons' ? 'settings' : coll === 'slides' ? 'content' : 'catalog');
+      need(coll === 'coupons' ? 'settings' : coll === 'slides' || coll === 'campaigns' ? 'content' : 'catalog');
       if (method === 'GET') return d[coll];
       if (method === 'DELETE') { d[coll] = d[coll].filter((x) => x.id !== id); save(); return { ok: true }; }
       if (method === 'POST') { const it = CLEAN[coll](body, null); d[coll].push(it); save(); return it; }

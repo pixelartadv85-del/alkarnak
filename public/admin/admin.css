@@ -189,3 +189,8 @@ tbody tr:hover td { background: var(--card2); }
 .typo-table td:first-child { min-width: 220px; }
 .typo-table .sel { min-width: 170px; }
 .typo-prev { margin-top: 4px; font-size: 1.05em; color: var(--muted); line-height: 1.5; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* الحملات */
+.camp-row { display: flex; gap: 14px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card2); flex-wrap: wrap; }
+.camp-row img, .camp-row .camp-ph { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex-shrink: 0; }
+.camp-row .camp-ph { display: grid; place-items: center; font-size: 1.6em; background: var(--card); }

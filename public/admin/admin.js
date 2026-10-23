@@ -85,9 +85,9 @@
   // ---------------------------------------------------------------- الهيكل
   const MENU = [
     ['', [['dashboard', '📊', 'الرئيسية', null]]],
-    ['المبيعات', [['orders', '🧾', 'الطلبات', 'orders'], ['blends', '🍵', 'طلبات الخلطات (AI)', 'orders']]],
+    ['المبيعات', [['orders', '🧾', 'الطلبات', 'orders'], ['blends', '🍵', 'طلبات الخلطات (AI)', 'orders'], ['customers', '👥', 'الزبائن', 'orders']]],
     ['الكتالوج', [['products', '📦', 'المنتجات', 'catalog'], ['categories', '🗂️', 'الأقسام', 'catalog'], ['reviews', '⭐', 'التقييمات', 'catalog']]],
-    ['المحتوى', [['slides', '🖼️', 'السلايدر', 'content'], ['popup', '📢', 'الإعلان المنبثق', 'content'], ['home', '🏠', 'الصفحة الرئيسية', 'content'], ['texts', '✏️', 'النصوص', 'content']]],
+    ['المحتوى', [['slides', '🖼️', 'السلايدر', 'content'], ['popup', '📢', 'الإعلان المنبثق', 'content'], ['home', '🏠', 'الصفحة الرئيسية', 'content'], ['texts', '✏️', 'النصوص', 'content'], ['campaigns', '📣', 'الحملات والعروض', 'content']]],
     ['الإعدادات', [['identity', '🌿', 'الاسم والشعار', 'settings'], ['design', '🎨', 'الألوان والخطوط', 'settings'], ['typography', '🔤', 'الخطوط لكل قسم', 'settings'], ['contact', '📞', 'التواصل وواتساب', 'settings'], ['shop', '🚚', 'الشحن والأسعار', 'settings'], ['coupons', '🏷️', 'كوبونات الخصم', 'settings'], ['ai', '🤖', 'المستشار الذكي', 'settings']]],
     ['النظام', [['users', '👥', 'المستخدمون', 'users'], ['backup', '💾', 'النسخ الاحتياطي', 'users'], ['account', '🔐', 'حسابي', null]]],
   ];
@@ -377,6 +377,52 @@
       $('#addP').onclick = () => productModal(null);
       $$('[data-edit]', c).forEach((b) => (b.onclick = () => productModal(products.find((p) => p.id === b.dataset.edit))));
       $$('[data-del]', c).forEach((b) => (b.onclick = async () => { if (confirmDo('حذف هذا المنتج نهائياً؟')) { await api('/products/' + b.dataset.del, 'DELETE'); toast('تم الحذف'); route(); } }));
+    },
+
+    async customers(c) {
+      const list = await api('/customers');
+      const f = A.cache.custF || 'all';
+      const q = A.cache.custQ || '';
+      const shown = list.filter((x) => (f === 'all' || (f === 'marketing' && x.marketing) || (f === 'account' && x.account)) && (!q || `${x.name} ${x.phone} ${x.town}`.includes(q)));
+      const subs = list.filter((x) => x.marketing);
+      c.innerHTML = `<div class="stats">
+          <div class="stat"><div class="ic">👥</div><div><b>${list.length}</b><small>كل الزبائن</small></div></div>
+          <div class="stat"><div class="ic">👤</div><div><b>${list.filter((x) => x.account).length}</b><small>أصحاب حسابات</small></div></div>
+          <div class="stat"><div class="ic">📣</div><div><b>${subs.length}</b><small>مشتركون بالعروض والجديد</small></div></div>
+        </div>
+        <div class="card"><div class="card-head"><div class="tabs">${[['all', 'الكل'], ['marketing', 'المشتركون بالعروض'], ['account', 'أصحاب الحسابات']].map(([k, t]) => `<button data-f="${k}" class="${f === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+          <div class="row"><input class="in" id="cq" placeholder="بحث: اسم، هاتف، بلدة" value="${esc(q)}" style="width:220px"><button class="btn btn-sec btn-sm" id="copyNums">📋 نسخ أرقام المشتركين</button><button class="btn btn-sec btn-sm" id="custCsv">⬇ تصدير Excel</button></div></div>
+        ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الهاتف</th><th>البلدة</th><th>الحساب</th><th>العروض</th><th>الطلبات</th><th>مجموع المشتريات</th><th>آخر طلب</th><th></th></tr></thead><tbody>
+          ${shown.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td dir="ltr" style="text-align:end">${esc(x.phone)}</td><td>${esc(x.town)}</td><td>${x.account ? pill('delivered', { delivered: 'حساب' }) : '<span class="muted">زائر</span>'}</td>
+            <td><label class="switch"><input type="checkbox" data-mk="${esc(x.phone)}" ${x.marketing ? 'checked' : ''}><i></i></label></td><td>${x.orders}</td><td>${money(x.spent)}</td><td>${x.lastOrderAt ? dt(x.lastOrderAt) : '—'}</td>
+            <td><a class="btn btn-wa btn-sm" target="_blank" rel="noopener" href="${esc(waTo(x.phone, `مرحباً ${x.name.split(' ')[0]}، معك متجر ${A.settings.storeName} 🌿`))}">💬</a></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد زبائن هنا بعد</div>'}</div>
+        <div class="alert" style="margin-top:18px">💡 "نسخ أرقام المشتركين" ينسخ أرقام كل من وافق على استلام العروض، لتلصقها في <b>قائمة بث (Broadcast)</b> بواتساب بزنس وترسل لهم رسالة واحدة دفعة واحدة. لا ترسل عروضاً لمن لم يوافق.</div>`;
+      $$('[data-f]', c).forEach((b) => (b.onclick = () => { A.cache.custF = b.dataset.f; route(); }));
+      $('#cq').onchange = (e) => { A.cache.custQ = e.target.value.trim(); route(); };
+      $$('[data-mk]', c).forEach((el) => (el.onchange = async () => { try { await api('/customers/' + encodeURIComponent(el.dataset.mk), 'PUT', { marketing: el.checked }); toast(el.checked ? '✓ تم الاشتراك' : 'تم إلغاء الاشتراك'); } catch (e) { toast(e.message, 'err'); } }));
+      $('#copyNums').onclick = () => copyText(subs.map((x) => '+' + intlPhone(x.phone)).join('\n'), `تم نسخ ${subs.length} رقم`);
+      $('#custCsv').onclick = () => downloadCSV('customers', [['الاسم', 'الهاتف', 'البلدة', 'حساب', 'مشترك بالعروض', 'عدد الطلبات', 'مجموع المشتريات']].concat(shown.map((x) => [x.name, x.phone, x.town, x.account ? 'نعم' : 'لا', x.marketing ? 'نعم' : 'لا', x.orders, x.spent])));
+    },
+
+    async campaigns(c) {
+      const list = (await api('/campaigns')).sort((a, b) => b.createdAt - a.createdAt);
+      c.innerHTML = `<div class="alert">📣 الحملة = خبر أو عرض أو منتج جديد. الحملات الفعّالة تظهر للزبائن داخل صفحة <b>"حسابي وطلباتي"</b> مع إشعار على أيقونة الحساب، ومنها ترسلها على واتساب للمشتركين بضغطة لكل زبون.</div>
+        <div class="card"><div class="card-head"><h3>الحملات</h3><button class="btn" id="addM">${ICON.plus} حملة جديدة</button></div>
+        ${list.length ? `<div style="display:grid;gap:12px">${list.map((k) => `<div class="camp-row">${k.image ? `<img src="${esc(safeUrl(k.image))}" alt="">` : '<div class="camp-ph">📣</div>'}
+          <div style="flex:1;min-width:0"><b>${esc(k.title)}</b> ${k.active ? pill('delivered', { delivered: 'ظاهرة للزبائن' }) : pill('cancelled', { cancelled: 'مخفية' })}<div class="muted" style="font-size:.88em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(k.text)}</div><small class="muted">${dt(k.createdAt)} • أُرسلت لـ ${(k.sentTo || []).length} زبون</small></div>
+          <div class="row"><button class="btn btn-wa btn-sm" data-send="${k.id}">💬 إرسال واتساب</button><button class="btn btn-sec btn-icon" data-edit="${k.id}">${ICON.edit}</button><button class="btn btn-sec btn-icon" data-del="${k.id}">${ICON.trash}</button></div></div>`).join('')}</div>` : '<div class="empty">لا توجد حملات بعد. أضف أول حملة: منتج جديد، عرض، أو خصم موسمي.</div>'}</div>`;
+      const fields = [
+        { k: 'title', label: 'العنوان', full: true, placeholder: 'مثال: وصل زيت الأرغان الأصلي 🌿' },
+        { k: 'text', label: 'نص الرسالة', type: 'textarea', hint: 'هذا النص يظهر للزبون في حسابه ويُرسل له على واتساب' },
+        { k: 'image', label: 'صورة (اختياري)', type: 'image', full: true },
+        { k: 'link', label: 'رابط داخل المتجر (اختياري)', ltr: true, hint: 'مثال: #/product/argan أو #/shop?sale=1' }, { k: 'linkText', label: 'نص الزر', placeholder: 'شاهد العرض' },
+        { k: 'active', label: 'تظهر للزبائن في صفحة حسابهم', type: 'bool' },
+      ];
+      const edit = (k) => crudModal(k ? 'تعديل حملة' : 'حملة جديدة', fields, k || { active: true, linkText: 'شاهد الآن', link: '#/shop' }, (d) => api(k ? '/campaigns/' + k.id : '/campaigns', k ? 'PUT' : 'POST', d));
+      $('#addM').onclick = () => edit(null);
+      $$('[data-edit]', c).forEach((b) => (b.onclick = () => edit(list.find((k) => k.id === b.dataset.edit))));
+      $$('[data-del]', c).forEach((b) => (b.onclick = async () => { if (confirmDo('حذف الحملة؟')) { await api('/campaigns/' + b.dataset.del, 'DELETE'); route(); } }));
+      $$('[data-send]', c).forEach((b) => (b.onclick = () => sendCampaignModal(list.find((k) => k.id === b.dataset.send))));
     },
 
     async categories(c) {
@@ -786,6 +832,50 @@
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     a.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
+  }
+
+  // ---------------------------------------------------------------- الحملات والزبائن
+  function copyText(text, okMsg) {
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.append(ta); ta.select();
+      try { document.execCommand('copy'); toast(okMsg); } catch { toast('انسخ النص يدوياً', 'err'); }
+      ta.remove();
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast(okMsg), fallback); else fallback();
+  }
+
+  function downloadCSV(name, rows) {
+    const csv = '﻿' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  }
+
+  async function sendCampaignModal(k) {
+    const subs = (await api('/customers')).filter((x) => x.marketing);
+    const storeUrl = location.origin + '/';
+    const link = k.link ? (k.link.startsWith('http') ? k.link : storeUrl + k.link.replace(/^\//, '')) : storeUrl;
+    const msgFor = (name) => `مرحباً ${name} 🌿\n*${k.title}*\n${k.text}\n\n${k.linkText || 'شاهد الآن'}: ${link}\n\n— ${A.settings.storeName}`;
+    const sent = new Set(k.sentTo || []);
+    const draw = () => {
+      const m = modal(`💬 إرسال "${esc(k.title)}" على واتساب`, `
+        <div class="alert ok">اضغط "إرسال" بجانب كل زبون: يفتح واتساب برسالة جاهزة، وأنت تضغط إرسال. أو انسخ الرسالة والأرقام وأرسلها لقائمة بث في واتساب بزنس.</div>
+        <div class="f"><label>نص الرسالة</label><div class="chat-view"><div class="m a" style="justify-self:stretch;max-width:100%">${esc(msgFor('[اسم الزبون]'))}</div></div></div>
+        <div class="row" style="margin:12px 0"><button class="btn btn-sec btn-sm" id="cpMsg">📋 نسخ الرسالة</button><button class="btn btn-sec btn-sm" id="cpNums">📋 نسخ الأرقام (${subs.length})</button><span class="muted">أُرسلت لـ ${[...sent].filter((p) => subs.some((x) => x.phone === p)).length} من ${subs.length}</span></div>
+        ${subs.length ? `<div class="table-wrap"><table><tbody>${subs.map((x) => `<tr><td><b>${esc(x.name)}</b><div class="muted" style="font-size:.85em">${esc(x.town)}</div></td><td dir="ltr" style="text-align:end">${esc(x.phone)}</td>
+          <td style="white-space:nowrap">${sent.has(x.phone) ? '<span class="pill st-delivered">✓ أُرسلت</span> ' : ''}<a class="btn ${sent.has(x.phone) ? 'btn-sec' : 'btn-wa'} btn-sm" target="_blank" rel="noopener" data-wa="${esc(x.phone)}" href="${esc(waTo(x.phone, msgFor(x.name.split(' ')[0])))}">${sent.has(x.phone) ? 'إعادة' : '💬 إرسال'}</a></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد مشتركون بالعروض بعد. يظهر هنا كل زبون يوافق على استلام العروض عند الطلب أو في حسابه.</div>'}`,
+        `<button class="btn" data-mclose>تم</button>`);
+      $('#cpMsg', m).onclick = () => copyText(msgFor('').replace('مرحباً  🌿', 'مرحباً 🌿'), 'تم نسخ الرسالة');
+      $('#cpNums', m).onclick = () => copyText(subs.map((x) => '+' + intlPhone(x.phone)).join('\n'), `تم نسخ ${subs.length} رقم`);
+      $$('[data-wa]', m).forEach((a) => a.addEventListener('click', () => {
+        sent.add(a.dataset.wa);
+        api(`/campaigns/${k.id}/sent`, 'POST', { phone: a.dataset.wa, sent: true }).catch(() => {});
+        setTimeout(draw, 300);
+      }));
+    };
+    draw();
   }
 
   // ---------------------------------------------------------------- المنتجات
