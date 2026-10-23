@@ -141,6 +141,12 @@
     cart: '.drawer, .summary-item',
     popupTitle: '.popup-body h3',
     popupText: '.popup-body p',
+    articleTitle: '.article-head h1',
+    articleLead: '.article-head .lead',
+    articleHeadings: '.article-content h4',
+    articleText: '.article-content p, .article-content li',
+    articleCardTitle: '.article-card h3',
+    articleCardText: '.article-body p',
     footerTitle: '.footer h4, .footer-brand',
     footer: '.footer p, .footer li, .footer-bottom',
   };
