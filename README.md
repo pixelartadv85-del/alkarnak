@@ -67,12 +67,14 @@ npm start
 
 كل بيانات المتجر (المنتجات، الطلبات، الإعدادات، الصور المرفوعة) محفوظة في مجلد `data/`، لذلك تحتاج استضافة فيها **قرص دائم (Persistent Disk / Volume)** حتى لا تضيع البيانات عند إعادة التشغيل.
 
-**مثال على Render.com:**
-1. New ← Web Service ← اربط مستودع GitHub هذا.
-2. Build command: `npm install` — Start command: `npm start`.
-3. أضف Disk بمسار `/var/data` واضبط متغير البيئة `DATA_DIR=/var/data`.
-4. أضف `ANTHROPIC_API_KEY`.
-5. بعد النشر اربط اسم نطاق خاص بك (مثل `aljalil.store`) من إعدادات Custom Domain.
+**على Render.com (الأسهل – بدون أي برمجة):**
+المشروع فيه ملف `render.yaml` يجهّز كل شيء تلقائياً (الخادم + قرص لحفظ البيانات).
+1. ادخل [render.com](https://render.com) وسجّل بحساب GitHub.
+2. **New +** ← **Blueprint** ← اختر المستودع `alkarnak` والفرع الذي فيه الكود.
+3. سيطلب قيمة `ANTHROPIC_API_KEY` (مفتاح المستشار الذكي) – ضعه الآن أو اتركه فارغاً وأضفه لاحقاً.
+4. اضغط **Apply** وانتظر 3-5 دقائق. رابط الموقع يظهر أعلى الصفحة (مثل `https://aljalil.onrender.com`).
+5. التكلفة تقريباً 7$ شهرياً للخادم + أقل من 1$ للقرص.
+6. لربط اسم نطاق خاص: Settings ← Custom Domains.
 
 يعمل أيضاً على Railway (مع Volume) أو أي خادم VPS عليه Node.js.
 
