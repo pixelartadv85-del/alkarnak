@@ -204,6 +204,7 @@
     const catLinks = S.data.categories.slice(0, S.data.aiAvailable ? 2 : 3).map((c) => [`#/shop?cat=${c.slug}`, c.name, 'cat-link']);
     const links = [['#/', 'الرئيسية'], ['#/shop', 'المتجر'], ...catLinks];
     if (S.data.aiAvailable) links.push(['#/advisor', '🌿 ' + (s.ai.assistantName || 'المستشار')]);
+    if ((S.data.articles || []).length) links.push(['#/blog', 'نصائح']);
     links.push(['#/about', 'من نحن'], ['#/contact', 'تواصل معنا']);
     $('#nav').innerHTML = links.map(([h, t, cls]) => `<a href="${h}" class="${cls || ''}">${esc(t)}</a>`).join('');
     $('#mobileLinks').innerHTML = [...links, ['#/account', '👤 حسابي وطلباتي'], ['#/track', 'تتبع طلبك'], ['#/favorites', 'المفضلة']]
@@ -280,14 +281,14 @@
           ${p.bestseller ? '<span class="tag tag-best">الأكثر طلباً</span>' : ''}
         </div>
         <button class="card-fav ${fav ? 'on' : ''}" data-fav="${p.id}" aria-label="أضف للمفضلة">${ICON.heart}</button>
-        ${p.inStock ? `<div class="card-quick"><button class="btn btn-block btn-sm" data-add="${p.id}">${ICON.cart} أضف للسلة</button></div>` : ''}
+        ${p.inStock ? `<div class="card-quick"><button class="btn btn-block btn-sm" data-add="${p.id}">${ICON.cart} ${p.fromPrice ? 'اختر الحجم' : 'أضف للسلة'}</button></div>` : ''}
       </div>
       <div class="card-body">
         <span class="card-cat">${esc(cat ? cat.name : '')}${p.size ? ' • ' + esc(p.size) : ''}</span>
         <h3 class="card-title"><a href="#/product/${encodeURIComponent(p.slug)}">${esc(p.name)}</a></h3>
         ${p.reviewsCount ? `<div class="rating-line">${stars(p.rating)} (${p.reviewsCount})</div>` : ''}
         <div class="card-foot">
-          <div class="price"><b>${money(p.finalPrice)}</b>${p.discount ? `<s>${money(p.price)}</s>` : ''}</div>
+          <div class="price">${p.fromPrice ? '<small>من</small>' : ''}<b>${money(p.finalPrice)}</b>${p.discount ? `<s>${money(p.price)}</s>` : ''}</div>
           ${p.inStock ? `<button class="add-mini" data-add="${p.id}" aria-label="أضف للسلة">${ICON.plus}</button>` : ''}
         </div>
       </div>
@@ -295,33 +296,41 @@
   }
 
   // ---------------------------------------------------------------- السلة
-  function addToCart(id, qty = 1, silent = false) {
+  // عنصر السلة: {id, variant, qty}. المنتج بأكثر من حجم له عنصر منفصل لكل حجم.
+  const cartKey = (i) => `${i.id}|${i.variant || ''}`;
+  const zoneList = () => Commerce.zones(S.data.settings);
+  const currentZone = () => { const z = load('jalil-zone', ''); return zoneList().some((x) => x.id === z) ? z : ''; };
+
+  function addToCart(id, qty = 1, silent = false, variant = '') {
     const p = product(id);
-    if (!p || !p.inStock) return toast('هذا المنتج غير متوفر حالياً', 'err');
-    const line = S.cart.find((i) => i.id === id);
-    const nextQty = Math.min(p.stock, (line ? line.qty : 0) + qty);
-    if (line) line.qty = nextQty; else S.cart.push({ id, qty: Math.min(qty, p.stock) });
+    if (!p) return;
+    const o = Commerce.option(p, variant);
+    if (!o || o.stock <= 0) return toast('هذا المنتج غير متوفر حالياً', 'err');
+    const v = o.variant ? o.variant.id : '';
+    const line = S.cart.find((i) => i.id === id && (i.variant || '') === v);
+    const nextQty = Math.min(o.stock, (line ? line.qty : 0) + qty);
+    if (line) line.qty = nextQty; else S.cart.push({ id, variant: v, qty: Math.min(qty, o.stock) });
     saveCart();
     const b = $('#cartCount');
     b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump');
-    if (!silent) toast(`✓ أُضيف "${p.name}" إلى السلة`);
+    if (!silent) toast(`✓ أُضيف "${p.name}${o.variant ? ' – ' + o.label : ''}" إلى السلة`);
   }
   function saveCart() {
-    S.cart = S.cart.filter((i) => product(i.id) && i.qty > 0);
+    S.cart = S.cart.filter((i) => { const p = product(i.id); return p && Commerce.option(p, i.variant || '') && i.qty > 0; });
     persist('jalil-cart', S.cart);
     updateBadges();
     renderCart();
   }
 
-  function cartTotals(couponDiscount = 0) {
-    const lines = S.cart.map((i) => ({ ...i, p: product(i.id) })).filter((l) => l.p);
-    const subtotal = round2(lines.reduce((a, l) => a + l.p.price * l.qty, 0));
-    const after = round2(lines.reduce((a, l) => a + l.p.finalPrice * l.qty, 0));
-    const shop = S.data.settings.shop;
+  // نفس منطق الخادم (lib/commerce.js) حتى تطابق الأرقام المعروضة ما سيُحسب فعلاً
+  function cartTotals(couponDiscount = 0, zoneId = currentZone()) {
+    const pr = Commerce.priceCart({ products: S.data.products, settings: S.data.settings, coupons: [] }, S.cart, '', zoneId);
+    const lines = pr.lines.map((l) => ({ ...l, key: `${l.productId}|${l.variantId}`, p: product(l.productId) }));
+    const after = round2(pr.subtotal - pr.productDiscount);
     const net = round2(after - couponDiscount);
-    const freeOver = Number(shop.freeShippingOver) || 0;
-    const shipping = !lines.length ? 0 : freeOver > 0 && net >= freeOver ? 0 : Number(shop.shippingFee) || 0;
-    return { lines, subtotal, discount: round2(subtotal - after), after, shipping, total: round2(net + shipping), freeOver };
+    const ship = Commerce.shippingFor(S.data.settings, net, zoneId, lines.length > 0);
+    const fees = zoneList().map((z) => Number(z.fee) || 0);
+    return { lines, subtotal: pr.subtotal, discount: pr.productDiscount, after, shipping: ship.shipping, needsZone: ship.needsZone, minFee: fees.length ? Math.min(...fees) : 0, total: round2(net + ship.shipping), freeOver: ship.freeOver };
   }
 
   function renderCart() {
@@ -337,19 +346,19 @@
       ${t.freeOver > 0 ? `<div class="ship-progress">${remain > 0 ? `أضف <b>${money(remain)}</b> للحصول على توصيل مجاني 🚚` : '🎉 مبروك! طلبك مؤهل للتوصيل المجاني'}<i><b style="width:${Math.min(100, (t.after / t.freeOver) * 100)}%"></b></i></div>` : ''}
       ${t.lines.map((l) => `
         <div class="cart-item">
-          <img src="${esc(safeUrl(l.p.images[0]))}" alt="">
+          <img src="${esc(safeUrl(l.image))}" alt="">
           <div>
-            <h4><a href="#/product/${encodeURIComponent(l.p.slug)}" data-close-cart>${esc(l.p.name)}</a></h4>
-            <div class="price"><b>${money(l.p.finalPrice)}</b>${l.p.discount ? `<s>${money(l.p.price)}</s>` : ''}</div>
-            <div class="qty sm" style="margin-top:6px"><button data-dec="${l.id}">−</button><input value="${l.qty}" data-qty="${l.id}" inputmode="numeric" aria-label="الكمية"><button data-inc="${l.id}">+</button></div>
+            <h4><a href="#/product/${encodeURIComponent(l.p.slug)}" data-close-cart>${esc(l.name)}</a>${l.size && Commerce.hasVariants(l.p) ? ` <small class="variant-tag">${esc(l.size)}</small>` : ''}</h4>
+            <div class="price"><b>${money(l.unitFinal)}</b>${l.discount ? `<s>${money(l.price)}</s>` : ''}</div>
+            <div class="qty sm" style="margin-top:6px"><button data-dec="${esc(l.key)}">−</button><input value="${l.qty}" data-qty="${esc(l.key)}" inputmode="numeric" aria-label="الكمية"><button data-inc="${esc(l.key)}">+</button></div>
           </div>
-          <button class="remove-btn" data-remove="${l.id}" aria-label="حذف">${ICON.trash}</button>
+          <button class="remove-btn" data-remove="${esc(l.key)}" aria-label="حذف">${ICON.trash}</button>
         </div>`).join('')}`;
     $('#cartFoot').innerHTML = `
       <div class="sum-row"><span>المجموع</span><span>${money(t.subtotal)}</span></div>
       ${t.discount ? `<div class="sum-row discount"><span>التوفير</span><span>-${money(t.discount)}</span></div>` : ''}
-      <div class="sum-row"><span>التوصيل</span><span>${t.shipping ? money(t.shipping) : 'مجاني'}</span></div>
-      <div class="sum-row total"><span>الإجمالي</span><span>${money(t.total)}</span></div>
+      <div class="sum-row"><span>التوصيل</span><span>${t.needsZone ? (t.after >= t.freeOver && t.freeOver > 0 ? 'مجاني' : `حسب المنطقة (من ${money(t.minFee)})`) : t.shipping ? money(t.shipping) : 'مجاني'}</span></div>
+      <div class="sum-row total"><span>الإجمالي</span><span>${money(t.total)}${t.needsZone && t.shipping === 0 && !(t.after >= t.freeOver && t.freeOver > 0) ? ' + التوصيل' : ''}</span></div>
       <a href="#/checkout" class="btn btn-block" style="margin-top:12px" data-close-cart>إتمام الطلب • الدفع عند الاستلام</a>`;
   }
 
@@ -379,12 +388,14 @@
     [/^\/advisor$/, pageAdvisor],
     [/^\/favorites$/, pageFavorites],
     [/^\/account$/, pageAccount],
+    [/^\/blog$/, pageBlog],
+    [/^\/blog\/(.+)$/, pageArticle],
     [/^\/about$/, pageAbout],
     [/^\/contact$/, pageContact],
   ];
 
   function parseHash() {
-    const raw = location.hash.slice(1) || '/';
+    const raw = location.hash.slice(1) || (/^\/(blog|product)(\/|$)/.test(location.pathname) ? location.pathname : '/');
     const [path, qs] = raw.split('?');
     return { path, query: new URLSearchParams(qs || '') };
   }
@@ -435,6 +446,7 @@
       </div></section>`);
       if (sec.key === 'offers') { const o = P.filter((p) => p.discount > 0).sort((a, b) => b.discount - a.discount).slice(0, 10); if (o.length) html.push(`<section class="section container" style="padding-top:0">${head(T('offersTitle'), T('offersSubtitle'), '#/shop?sale=1')}<div class="rail">${o.map(card).join('')}</div></section>`); }
       if (sec.key === 'bestsellers') { const b = P.filter((p) => p.bestseller).slice(0, 8); if (b.length) html.push(`<section class="section container" style="padding-top:0">${head(T('bestsellersTitle'), '', '#/shop?sort=popular')}<div class="grid">${b.map(card).join('')}</div></section>`); }
+      if (sec.key === 'articles' && (S.data.articles || []).length) html.push(`<section class="section container" style="padding-top:0">${head(T('articlesTitle') || 'نصائح ومقالات', T('articlesSubtitle'), '#/blog')}<div class="articles-grid">${S.data.articles.slice(0, 3).map(articleCard).join('')}</div></section>`);
       if (sec.key === 'testimonials' && S.data.testimonials.length) html.push(`<section class="section container" style="padding-top:0">${head(T('testimonialsTitle'), '')}<div class="rail">${S.data.testimonials.map((r) => `
         <div class="testi reveal">${stars(r.rating)}<p>${esc(r.text)}</p><div class="testi-who"><span class="avatar">${esc(r.name.trim()[0] || '؟')}</span><div><b>${esc(r.name)}</b><small>${esc(r.town || '')}${r.productName ? ' • ' + esc(r.productName) : ''}</small></div></div></div>`).join('')}</div></section>`);
     }
@@ -572,7 +584,9 @@
     if (!p) return page404(app);
     const cat = category(p.categoryId);
     const s = S.data.settings;
-    const low = p.stock > 0 && p.stock <= (s.shop.lowStockAlert || 5);
+    const variants = Commerce.hasVariants(p) ? p.variants : [];
+    let sel = (variants.find((v) => v.stock > 0) || variants[0] || {}).id || '';
+    const lowAt = s.shop.lowStockAlert || 5;
     const related = S.data.products.filter((x) => x.categoryId === p.categoryId && x.id !== p.id).slice(0, 4);
     const tabs = [
       ['desc', 'الوصف', `<p>${esc(p.description).replace(/\n/g, '<br>')}</p>`],
@@ -595,9 +609,10 @@
             <span class="card-cat">${esc(cat ? cat.icon + ' ' + cat.name : '')}</span>
             <h1>${esc(p.name)}</h1>
             <div class="p-meta">${p.reviewsCount ? `${stars(p.rating)} <a href="#reviews" data-scroll="reviews">${p.rating} • ${p.reviewsCount} تقييم</a>` : '<span>كن أول من يقيّم</span>'}${p.size ? `<span>📦 ${esc(p.size)}</span>` : ''}</div>
-            <div class="p-price"><b>${money(p.finalPrice)}</b>${p.discount ? `<s>${money(p.price)}</s><span class="save-pill">وفّر ${money(p.price - p.finalPrice)}</span>` : ''}</div>
+            <div class="p-price" id="pPrice"></div>
+            ${variants.length ? `<div class="variants"><span>الحجم:</span>${variants.map((v) => `<button type="button" class="variant ${v.id === sel ? 'on' : ''}" data-variant="${esc(v.id)}" ${v.stock > 0 ? '' : 'data-out="1"'}>${esc(v.name)}<small>${money(Commerce.applyDiscount(v.price, p.discount))}</small></button>`).join('')}</div>` : ''}
             <p class="p-short">${esc(p.shortDesc)}</p>
-            <div class="stock-line ${!p.inStock ? 'out' : low ? 'low' : 'ok'}">${!p.inStock ? '✕ نفدت الكمية' : low ? `⚡ بقي ${p.stock} قطع فقط – اطلب الآن` : '✓ متوفر في المخزون'}</div>
+            <div class="stock-line" id="pStock"></div>
             <div class="p-actions">
               ${p.inStock ? `<div class="qty"><button id="qDec">−</button><input id="qVal" value="1" inputmode="numeric" aria-label="الكمية"><button id="qInc">+</button></div>
               <button class="btn" id="addBtn" style="flex:1">${ICON.cart} أضف إلى السلة</button>
@@ -641,14 +656,33 @@
       $$('[data-tab]').forEach((x) => x.classList.toggle('on', x === b));
       $$('[data-pane]').forEach((x) => (x.hidden = x.dataset.pane !== b.dataset.tab));
     }));
+    // السعر والمخزون حسب الحجم المختار
+    const showOption = () => {
+      const o = Commerce.option(p, sel);
+      const final = Commerce.applyDiscount(o.price, p.discount);
+      $('#pPrice').innerHTML = `<b>${money(final)}</b>${p.discount ? `<s>${money(o.price)}</s><span class="save-pill">وفّر ${money(o.price - final)}</span>` : ''}`;
+      const st = $('#pStock');
+      st.className = 'stock-line ' + (o.stock <= 0 ? 'out' : o.stock <= lowAt ? 'low' : 'ok');
+      st.textContent = o.stock <= 0 ? '✕ نفدت الكمية' + (variants.length ? ' من هذا الحجم' : '') : o.stock <= lowAt ? `⚡ بقي ${o.stock} قطع فقط – اطلب الآن` : '✓ متوفر في المخزون';
+      ['#addBtn', '#buyNow'].forEach((id) => { const b = $(id); if (b) b.disabled = o.stock <= 0; });
+      return o;
+    };
+    showOption();
+    $$('[data-variant]').forEach((b) => (b.onclick = () => {
+      sel = b.dataset.variant;
+      $$('[data-variant]').forEach((x) => x.classList.toggle('on', x === b));
+      showOption();
+      const qv = $('#qVal');
+      if (qv) qv.value = Math.max(1, Math.min(Commerce.option(p, sel).stock || 1, +qv.value || 1));
+    }));
     if (p.inStock) {
       const qv = $('#qVal');
-      const clamp = (v) => Math.max(1, Math.min(p.stock, parseInt(v, 10) || 1));
+      const clamp = (v) => Math.max(1, Math.min(Commerce.option(p, sel).stock || 1, parseInt(v, 10) || 1));
       $('#qDec').onclick = () => (qv.value = clamp(+qv.value - 1));
       $('#qInc').onclick = () => (qv.value = clamp(+qv.value + 1));
       qv.onchange = () => (qv.value = clamp(qv.value));
-      $('#addBtn').onclick = () => { addToCart(p.id, clamp(qv.value)); openCart(); };
-      $('#buyNow').onclick = () => { addToCart(p.id, clamp(qv.value), true); navigate('#/checkout'); };
+      $('#addBtn').onclick = () => { addToCart(p.id, clamp(qv.value), false, sel); openCart(); };
+      $('#buyNow').onclick = () => { addToCart(p.id, clamp(qv.value), true, sel); navigate('#/checkout'); };
     }
     loadReviews(p);
     $('#revForm').onsubmit = async (e) => {
@@ -695,6 +729,7 @@
               ${field('lastName', 'اسم العائلة', saved.lastName, true)}
               ${field('phone', 'رقم الهاتف', saved.phone, true, 'tel', 'مثال: 0501234567', 'dir="ltr" inputmode="tel"')}
               ${field('phone2', 'رقم هاتف إضافي', saved.phone2, false, 'tel', 'اختياري', 'dir="ltr" inputmode="tel"')}
+              ${zoneList().length ? `<div class="field"><label>منطقة التوصيل <span class="req">*</span></label><select class="select" name="zone" id="zoneSel"><option value="">— اختر منطقتك —</option>${zoneList().map((z) => `<option value="${esc(z.id)}" ${currentZone() === z.id ? 'selected' : ''}>${esc(z.name)} – ${Number(z.fee) ? money(z.fee) : 'مجاني'}</option>`).join('')}</select></div>` : ''}
               ${field('town', 'البلدة / المدينة', saved.town, true)}
               ${field('address', 'العنوان بالتفصيل', saved.address, true, 'text', 'الحي، الشارع، رقم البيت أو علامة مميزة')}
               <div class="field full"><label>📍 الموقع على الخريطة ${s.shop.requireLocation ? '<span class="req">*</span>' : '<small style="color:var(--muted)">(يساعدنا على الوصول أسرع)</small>'}</label>
@@ -732,19 +767,20 @@
 
     const renderSummary = () => {
       const t = cartTotals(st.couponDiscount);
-      $('#sumItems').innerHTML = t.lines.map((l) => `<div class="summary-item"><img src="${esc(safeUrl(l.p.images[0]))}" alt=""><div><div>${esc(l.p.name)}</div><small style="color:var(--muted)">${l.qty} × ${money(l.p.finalPrice)}</small></div><b>${money(l.p.finalPrice * l.qty)}</b></div>`).join('');
+      $('#sumItems').innerHTML = t.lines.map((l) => `<div class="summary-item"><img src="${esc(safeUrl(l.image))}" alt=""><div><div>${esc(l.name)}${l.size && Commerce.hasVariants(l.p) ? ` <small class="variant-tag">${esc(l.size)}</small>` : ''}</div><small style="color:var(--muted)">${l.qty} × ${money(l.unitFinal)}</small></div><b>${money(l.lineTotal)}</b></div>`).join('');
       $('#sumTotals').innerHTML = `
         <div class="sum-row"><span>المجموع</span><span>${money(t.subtotal)}</span></div>
         ${t.discount ? `<div class="sum-row discount"><span>خصم المنتجات</span><span>-${money(t.discount)}</span></div>` : ''}
         ${st.couponDiscount ? `<div class="sum-row discount"><span>كوبون (${esc(st.coupon)})</span><span>-${money(st.couponDiscount)}</span></div>` : ''}
-        <div class="sum-row"><span>التوصيل</span><span>${t.shipping ? money(t.shipping) : 'مجاني 🎉'}</span></div>
+        <div class="sum-row"><span>التوصيل${t.needsZone ? '' : ''}</span><span>${t.needsZone ? '<span style="color:var(--muted)">اختر منطقة التوصيل</span>' : t.shipping ? money(t.shipping) : 'مجاني 🎉'}</span></div>
         <div class="sum-row total"><span>الإجمالي للدفع</span><span>${money(t.total)}</span></div>`;
     };
     renderSummary();
+    $('#zoneSel')?.addEventListener('change', (e) => { persist('jalil-zone', e.target.value); renderSummary(); renderCart(); const f = e.target.closest('.field'); f.classList.remove('err'); f.querySelector('.err-msg')?.remove(); });
 
     const applyCoupon = async (code) => {
       try {
-        const r = await api('/cart/price', { body: { items: S.cart, coupon: code } });
+        const r = await api('/cart/price', { body: { items: S.cart, coupon: code, zone: currentZone() } });
         if (r.couponError) { st.coupon = ''; st.couponDiscount = 0; $('#couponMsg').innerHTML = `<span style="color:#c0392b">${esc(r.couponError)}</span>`; }
         else { st.coupon = r.couponCode; st.couponDiscount = r.couponDiscount; $('#couponMsg').innerHTML = `<span style="color:#2e8b57">✓ تم تطبيق الكود – وفّرت ${money(r.couponDiscount)}</span>`; }
         renderSummary();
@@ -775,25 +811,26 @@
       for (const k of ['firstName', 'lastName', 'town', 'address']) if (!String(data[k] || '').trim()) errs[k] = 'هذا الحقل مطلوب';
       if (!PHONE_RE.test(data.phone)) errs.phone = 'رقم هاتف غير صحيح (10 أرقام تبدأ بـ 05)';
       if (data.phone2 && !PHONE_RE.test(data.phone2)) errs.phone2 = 'رقم غير صحيح';
+      if (zoneList().length && !data.zone) errs.zone = 'اختر منطقة التوصيل';
       if (s.shop.requireLocation && !st.location && !data.locationLink) { toast('يرجى تحديد موقعك', 'err'); return; }
       for (const [k, m] of Object.entries(errs)) {
         const f = form.querySelector(`[name="${k}"]`).closest('.field');
         f.classList.add('err'); f.insertAdjacentHTML('beforeend', `<div class="err-msg">${m}</div>`);
       }
-      if (Object.keys(errs).length) { form.querySelector('.err .input').focus(); toast('يرجى تصحيح الحقول المطلوبة', 'err'); return; }
+      if (Object.keys(errs).length) { form.querySelector('.err .input, .err .select').focus(); toast('يرجى تصحيح الحقول المطلوبة', 'err'); return; }
       const wantAcct = $('#acctChk') && $('#acctChk').checked;
       if (wantAcct && $('#acctPw').value.length < 6) { toast('اختر كلمة مرور للحساب من 6 أحرف على الأقل', 'err'); $('#acctPw').focus(); return; }
       if (!$('#confirmChk').checked) { toast('يرجى تأكيد صحة المعلومات', 'err'); return; }
       const btn = $('#placeBtn');
       btn.disabled = true; btn.textContent = 'جارٍ إرسال الطلب…';
       try {
-        const { notes, marketing, ...rest } = data;
+        const { notes, marketing, zone, ...rest } = data;
         persist('jalil-customer', rest);
-        const r = await api('/orders', { body: { items: S.cart, coupon: st.coupon, marketing: Boolean($('#mkChk') && $('#mkChk').checked), createAccount: wantAcct ? { password: $('#acctPw').value } : null, customer: { ...data, location: st.location } } });
+        const r = await api('/orders', { body: { items: S.cart, coupon: st.coupon, zone: data.zone || '', marketing: Boolean($('#mkChk') && $('#mkChk').checked), createAccount: wantAcct ? { password: $('#acctPw').value } : null, customer: { ...data, location: st.location } } });
         rememberOrder(r.number, data.phone);
         if (r.accountCreated || S.account) await refreshAccount();
         const t = cartTotals(st.couponDiscount);
-        persist('jalil-last-order', { number: r.number, total: r.total, phone: data.phone, items: t.lines.map((l) => ({ name: l.p.name, qty: l.qty })) }, sessionStorage);
+        persist('jalil-last-order', { number: r.number, total: r.total, phone: data.phone, items: t.lines.map((l) => ({ name: l.name, qty: l.qty })) }, sessionStorage);
         S.cart = []; saveCart();
         sessionStorage.removeItem('jalil-coupon');
         navigate('#/success/' + r.number);
@@ -1032,6 +1069,47 @@
     persist('jalil-chat', S.chat, sessionStorage);
     S.chatBusy = false;
     if ($('#chatLog')) renderChatLog();
+  }
+
+  // ---------------------------------------------------------------- المقالات والنصائح
+  const articleUrl = (a) => `${location.origin}/blog/${encodeURIComponent(a.slug)}`;
+  const fmtDate = (t) => new Date(t).toLocaleDateString('ar-EG', { dateStyle: 'long' });
+
+  function articleCard(a) {
+    return `<a class="article-card reveal" href="#/blog/${encodeURIComponent(a.slug)}">
+      <div class="article-img">${a.image ? `<img src="${esc(safeUrl(a.image))}" alt="" loading="lazy">` : ''}</div>
+      <div class="article-body"><small>${fmtDate(a.createdAt)}</small><h3>${esc(a.title)}</h3><p>${esc(a.excerpt)}</p><span class="link-more">اقرأ المزيد ${ICON.arrow}</span></div></a>`;
+  }
+
+  function pageBlog(app) {
+    const list = S.data.articles || [];
+    app.innerHTML = `<section class="page-hero"><div class="container"><div class="crumbs"><a href="#/">الرئيسية</a> / نصائح ومقالات</div><h1>${esc(T('articlesTitle') || 'نصائح ومقالات')}</h1><p style="color:var(--muted);margin:.3em 0 0">${esc(T('articlesSubtitle'))}</p></div></section>
+      <div class="container" style="padding-bottom:80px">${list.length ? `<div class="articles-grid">${list.map(articleCard).join('')}</div>` : '<div class="empty"><div class="big">📝</div><p>لا توجد مقالات بعد</p></div>'}</div>`;
+  }
+
+  async function pageArticle(app, q, slug) {
+    const summary = (S.data.articles || []).find((a) => a.slug === slug);
+    if (!summary) return page404(app);
+    app.innerHTML = `<div class="container"><div class="skeleton" style="height:420px;margin:40px 0"></div></div>`;
+    let a;
+    try { a = await api('/articles/' + encodeURIComponent(slug)); } catch { return page404(app); }
+    if (parseHash().path !== '/blog/' + slug) return; // انتقل الزائر لصفحة أخرى أثناء التحميل
+    document.title = `${a.title} | ${S.data.settings.storeName}`;
+    const prods = (a.productIds || []).map(product).filter(Boolean);
+    const more = (S.data.articles || []).filter((x) => x.slug !== slug).slice(0, 3);
+    const share = `${a.title}\n${articleUrl(a)}`;
+    app.innerHTML = `<article class="article container">
+        <div class="crumbs" style="padding-top:22px"><a href="#/">الرئيسية</a> / <a href="#/blog">نصائح ومقالات</a></div>
+        <header class="article-head"><small>${fmtDate(a.createdAt)}</small><h1>${esc(a.title)}</h1><p class="lead">${esc(a.excerpt)}</p></header>
+        ${a.image ? `<div class="article-hero"><img src="${esc(safeUrl(a.image))}" alt=""></div>` : ''}
+        <div class="article-content prose">${md(a.content)}</div>
+        <div class="article-share"><span>شارك المقال:</span><a class="btn btn-wa btn-sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(share)}">${ICON.wa} واتساب</a><a class="btn btn-soft btn-sm" target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl(a))}">فيسبوك</a><button class="btn btn-soft btn-sm" data-copy-link="${esc(articleUrl(a))}">🔗 نسخ الرابط</button></div>
+        <p class="disclaimer-note">⚕️ ${esc(T('medicalDisclaimer'))}</p>
+      </article>
+      ${prods.length ? `<section class="section container" style="padding-top:20px">${head('منتجات ذكرناها في المقال', '')}<div class="grid">${prods.map(card).join('')}</div></section>` : ''}
+      ${more.length ? `<section class="section container" style="padding-top:0">${head('اقرأ أيضاً', '', '#/blog')}<div class="articles-grid">${more.map(articleCard).join('')}</div></section>` : ''}
+      ${S.data.aiAvailable ? `<section class="container" style="padding-bottom:60px"><div class="advisor-banner"><div><h2>عندك سؤال عن حالتك؟</h2><p>اسأل ${esc(S.data.settings.ai.assistantName)} واحصل على خلطة طبيعية تناسبك.</p><a class="btn btn-accent" href="#/advisor">${esc(T('advisorButton'))}</a></div></div></section>` : ''}`;
+    observeReveal();
   }
 
   // ---------------------------------------------------------------- حسابي وطلباتي
@@ -1275,12 +1353,19 @@
     document.addEventListener('click', (e) => {
       const t = e.target;
       let el;
-      if ((el = t.closest('[data-add]'))) { e.preventDefault(); addToCart(el.dataset.add); return; }
+      if ((el = t.closest('[data-add]'))) {
+        e.preventDefault();
+        const p = product(el.dataset.add);
+        // منتج بأكثر من حجم: نفتح صفحته لاختيار الحجم
+        if (p && Commerce.hasVariants(p) && p.variants.length > 1) { navigate('#/product/' + encodeURIComponent(p.slug)); return; }
+        addToCart(el.dataset.add);
+        return;
+      }
       if ((el = t.closest('[data-fav]'))) { e.preventDefault(); toggleFav(el.dataset.fav); return; }
       if ((el = t.closest('[data-go]'))) { navigate(el.dataset.go, true); $('#filters')?.classList.remove('open'); return; }
-      if ((el = t.closest('[data-inc]'))) { const l = S.cart.find((i) => i.id === el.dataset.inc); const p = product(l.id); if (l.qty < p.stock) l.qty++; else toast(`الكمية المتوفرة ${p.stock} فقط`, 'err'); saveCart(); return; }
-      if ((el = t.closest('[data-dec]'))) { const l = S.cart.find((i) => i.id === el.dataset.dec); l.qty = Math.max(1, l.qty - 1); saveCart(); return; }
-      if ((el = t.closest('[data-remove]'))) { S.cart = S.cart.filter((i) => i.id !== el.dataset.remove); saveCart(); return; }
+      if ((el = t.closest('[data-inc]'))) { const l = S.cart.find((i) => cartKey(i) === el.dataset.inc); const max = Commerce.option(product(l.id), l.variant || '').stock; if (l.qty < max) l.qty++; else toast(`الكمية المتوفرة ${max} فقط`, 'err'); saveCart(); return; }
+      if ((el = t.closest('[data-dec]'))) { const l = S.cart.find((i) => cartKey(i) === el.dataset.dec); l.qty = Math.max(1, l.qty - 1); saveCart(); return; }
+      if ((el = t.closest('[data-remove]'))) { S.cart = S.cart.filter((i) => cartKey(i) !== el.dataset.remove); saveCart(); return; }
       if (t.closest('[data-close-cart]')) openCart(false);
       if (t.closest('[data-close-search]') || (t.closest('#searchOverlay [data-close]')) || t.id === 'searchOverlay') $('#searchOverlay').hidden = true;
       if (t.closest('#mobileNav [data-close]') || t.id === 'mobileNav') $('#mobileNav').hidden = true;
@@ -1291,14 +1376,19 @@
         sessionStorage.setItem('jalil-coupon', code);
         toast('✓ تم نسخ الكود وسيُطبّق تلقائياً عند الدفع');
       }
+      if ((el = t.closest('[data-copy-link]'))) {
+        const url = el.dataset.copyLink;
+        (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(() => toast('✓ تم نسخ الرابط'), () => toast(url));
+        return;
+      }
       if ((el = t.closest('[data-scroll]'))) { e.preventDefault(); document.getElementById(el.dataset.scroll)?.scrollIntoView({ behavior: 'smooth' }); }
     });
     document.addEventListener('change', (e) => {
       const el = e.target.closest('[data-qty]');
       if (!el) return;
-      const l = S.cart.find((i) => i.id === el.dataset.qty);
-      const p = product(l.id);
-      l.qty = Math.max(1, Math.min(p.stock, parseInt(el.value, 10) || 1));
+      const l = S.cart.find((i) => cartKey(i) === el.dataset.qty);
+      const max = Commerce.option(product(l.id), l.variant || '').stock;
+      l.qty = Math.max(1, Math.min(max, parseInt(el.value, 10) || 1));
       saveCart();
     });
     $('#cartBtn').onclick = () => openCart(true);
@@ -1330,7 +1420,7 @@
       $('#app').innerHTML = '<div class="container"><div class="empty" style="padding:120px 0"><div class="big">⚠️</div><h2>تعذّر تحميل المتجر</h2><button class="btn" onclick="location.reload()">إعادة المحاولة</button></div></div>';
       return;
     }
-    S.cart = S.cart.filter((i) => product(i.id));
+    S.cart = S.cart.filter((i) => product(i.id) && Commerce.option(product(i.id), i.variant || ''));
     refreshAccount();
     applyTheme();
     renderShell();

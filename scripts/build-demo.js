@@ -29,6 +29,8 @@ demo.settings.popup.delay = 6;
 
 const seedJs = `window.__DEMO_SEED__=${JSON.stringify(demo).replace(/</g, '\\u003c')};`;
 const mock = read('demo/mock-api.js');
+const commerce = read('lib/commerce.js');
+const qrlib = fs.readFileSync(require.resolve('qrcode-generator/qrcode.js'), 'utf8');
 const icon = 'data:image/svg+xml;base64,' + Buffer.from(read('public/icon.svg')).toString('base64');
 const fill = (html) => html.replaceAll('{{TITLE}}', 'متجر الجليل').replaceAll('{{DESC}}', data.settings.seo.description).replaceAll('{{THEME}}', data.settings.colors.primary);
 
@@ -47,8 +49,10 @@ const head = store.slice(store.indexOf('<head>') + 6, store.indexOf('</head>'))
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:60;background:var(--bg)}
 </style>`);
 let body = store.slice(store.indexOf('<body>') + 6, store.indexOf('</body>'))
+    .replace('<script src="/js/commerce.js"></script>', '')
   .replace('<script src="/js/store.js"></script>', () => `<div class="demo-pill">نسخة تجريبية <button type="button" onclick="__demoReset()">إعادة ضبط</button><a href="admin.html">🔐 لوحة التحكم</a></div>
 <script>${seedJs}</script>
+<script>${commerce}</script>
 <script>${mock}</script>
 <script>${read('public/js/store.js')}</script>`);
 fs.writeFileSync(path.join(out, 'index.html'), head.trim() + '\n' + body.trim() + '\n');
@@ -57,7 +61,7 @@ fs.writeFileSync(path.join(out, 'index.html'), head.trim() + '\n' + body.trim() 
 let admin = fill(read('public/admin/index.html'))
   .replace('href="/icon.svg"', `href="${icon}"`)
   .replace('<link rel="stylesheet" href="/admin/admin.css">', () => `<style>${read('public/admin/admin.css')}</style>`)
-  .replace('<script src="/admin/admin.js"></script>', () => `<script>${seedJs}</script>\n<script>${mock}</script>\n<script>${read('public/admin/admin.js')
+  .replace('<script src="/admin/admin.js"></script>', () => `<script>${seedJs}</script>\n<script>${commerce}</script>\n<script>${qrlib}</script>\n<script>${mock}</script>\n<script>${read('public/admin/admin.js')
     .replace(`href="/" target="_blank"`, `href="index.html"`).replaceAll('<a class="btn btn-sec" href="/" target="_blank">', '<a class="btn btn-sec" href="index.html">')
     .replace('href="/#/product/', 'href="index.html#/product/').replace('href="/api/admin/backup"', 'href="#backup"')}</script>`);
 fs.writeFileSync(path.join(out, 'admin.html'), admin);

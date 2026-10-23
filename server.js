@@ -6,6 +6,8 @@ const express = require('express');
 const store = require('./lib/store');
 const { seed, defaultSettings, hashPassword, writeSeedImages } = require('./lib/seed');
 const ai = require('./lib/ai');
+const Commerce = require('./lib/commerce');
+const notifyLib = require('./lib/notify');
 
 const PORT = process.env.PORT || 3000;
 const db = () => store.db;
@@ -48,7 +50,11 @@ function deepMerge(target, src) {
 function migrateSettings() {
   const merged = deepMerge(defaultSettings(), db().settings);
   db().settings = merged;
-  for (const key of ['coupons', 'orders', 'blendRequests', 'reviews', 'slides', 'users', 'customers', 'campaigns']) db()[key] = db()[key] || [];
+  for (const key of ['coupons', 'orders', 'blendRequests', 'reviews', 'slides', 'users', 'customers', 'campaigns', 'articles']) db()[key] = db()[key] || [];
+  // إضافة أقسام الصفحة الرئيسية الجديدة للنسخ القديمة
+  const secs = db().settings.home.sections;
+  for (const def of defaultSettings().home.sections) if (!secs.some((x) => x.key === def.key)) secs.push(def);
+  db().notify = db().notify || { enabled: false, botToken: '', chatId: '', events: {} };
   store.save();
 }
 
@@ -67,8 +73,6 @@ function rateLimiter(max, windowMs) {
   };
 }
 
-const finalPrice = (p) => round2(p.price * (1 - Math.min(100, Math.max(0, p.discount || 0)) / 100));
-
 function productRating(pid) {
   const rs = db().reviews.filter((r) => r.productId === pid && r.approved);
   return { rating: rs.length ? round2(rs.reduce((a, r) => a + r.rating, 0) / rs.length) : 0, reviewsCount: rs.length };
@@ -76,48 +80,17 @@ function productRating(pid) {
 
 function publicProduct(p) {
   const { sold, ...rest } = p;
-  return { ...rest, finalPrice: finalPrice(p), inStock: p.stock > 0, ...productRating(p.id) };
-}
-
-function findCoupon(code) {
-  if (!code) return null;
-  const c = db().coupons.find((k) => k.active && k.code.toLowerCase() === String(code).trim().toLowerCase());
-  if (!c) return null;
-  if (c.expires && new Date(c.expires + 'T23:59:59') < new Date()) return null;
-  return c;
+  const dp = Commerce.displayPrice(p);
+  const stock = Commerce.totalStock(p);
+  return { ...rest, price: dp.price, finalPrice: dp.finalPrice, fromPrice: dp.from, stock, inStock: stock > 0, ...productRating(p.id) };
 }
 
 // حساب الطلب على الخادم دائماً (لا نثق بأسعار المتصفح)
-function priceCart(items, couponCode) {
-  const s = db().settings.shop;
-  const lines = [];
-  for (const it of Array.isArray(items) ? items : []) {
-    const p = db().products.find((x) => x.id === it.id && x.active);
-    const qty = Math.max(1, Math.min(99, Math.floor(num(it.qty, 1))));
-    if (!p) continue;
-    const unit = finalPrice(p);
-    lines.push({ productId: p.id, name: p.name, size: p.size || '', image: p.images[0] || '', price: p.price, discount: p.discount || 0, unitFinal: unit, qty, lineTotal: round2(unit * qty), stock: p.stock });
-  }
-  const subtotal = round2(lines.reduce((a, l) => a + l.price * l.qty, 0));
-  const productDiscount = round2(lines.reduce((a, l) => a + (l.price - l.unitFinal) * l.qty, 0));
-  const afterDiscount = round2(subtotal - productDiscount);
-  let coupon = null;
-  let couponDiscount = 0;
-  let couponError = '';
-  if (couponCode) {
-    const c = findCoupon(couponCode);
-    if (!c) couponError = 'كود الخصم غير صالح أو منتهي';
-    else if (afterDiscount < (c.minTotal || 0)) couponError = `هذا الكود يتطلب طلباً بقيمة ${c.minTotal} ₪ على الأقل`;
-    else {
-      coupon = c;
-      couponDiscount = c.type === 'percent' ? round2((afterDiscount * c.value) / 100) : Math.min(afterDiscount, c.value);
-    }
-  }
-  const net = round2(afterDiscount - couponDiscount);
-  const freeOver = num(s.freeShippingOver);
-  const shipping = lines.length === 0 ? 0 : freeOver > 0 && net >= freeOver ? 0 : num(s.shippingFee);
-  return { lines, subtotal, productDiscount, couponCode: coupon ? coupon.code : '', couponDiscount, couponError, shipping, total: round2(net + shipping) };
-}
+const priceCart = (items, couponCode, zoneId) => Commerce.priceCart(db(), items, couponCode, zoneId);
+
+// تنبيهات تيليجرام
+const notify = notifyLib.create(() => db().notify);
+const H = notifyLib.escHtml;
 
 const PHONE_RE = /^(\+?(972|970)|0)5\d{8}$/;
 const normPhone = (p) => String(p || '').replace(/[\s\-()]/g, '');
@@ -225,6 +198,7 @@ api.get('/bootstrap', (req, res) => {
     testimonials: d.reviews.filter((r) => r.approved && r.rating >= 4).sort((a, b) => b.createdAt - a.createdAt).slice(0, 9)
       .map((r) => ({ ...r, productName: (d.products.find((p) => p.id === r.productId) || {}).name || '' })),
     aiAvailable: d.settings.ai.enabled && ai.isConfigured(),
+    articles: publishedArticles().map(articleSummary),
   });
 });
 
@@ -242,12 +216,13 @@ api.post('/products/:id/reviews', rateLimiter(5, 3600e3), (req, res) => {
   if (!name || text.length < 3) return res.status(400).json({ error: 'يرجى كتابة الاسم والتقييم' });
   const approved = Boolean(db().settings.shop.autoApproveReviews);
   db().reviews.push({ id: store.id('r_'), productId: p.id, name, town: str(req.body.town, 60), rating, text, approved, createdAt: Date.now() });
+  notify('reviews', `⭐ تقييم جديد (${'★'.repeat(rating)}) على ${H(p.name)}\n${H(name)}: ${H(text)}${approved ? '' : '\n(بانتظار موافقتك في لوحة التحكم)'}`);
   store.save();
   res.json({ ok: true, approved });
 });
 
 api.post('/cart/price', (req, res) => {
-  res.json(priceCart(req.body.items, req.body.coupon));
+  res.json(priceCart(req.body.items, req.body.coupon, req.body.zone));
 });
 
 api.post('/orders', rateLimiter(10, 3600e3), (req, res) => {
@@ -274,11 +249,12 @@ api.post('/orders', rateLimiter(10, 3600e3), (req, res) => {
   if (!customer.address) errors.push('العنوان مطلوب');
   if (!PHONE_RE.test(customer.phone)) errors.push('رقم الهاتف غير صحيح (مثال: 0501234567)');
   if (db().settings.shop.requireLocation && !customer.location && !customer.locationLink) errors.push('يرجى تحديد موقعك');
-  const priced = priceCart(b.items, b.coupon);
+  const priced = priceCart(b.items, b.coupon, b.zone);
   if (!priced.lines.length) errors.push('السلة فارغة');
+  if (priced.needsZone) errors.push('يرجى اختيار منطقة التوصيل');
   const minOrder = num(db().settings.shop.minOrder);
   if (minOrder && priced.total - priced.shipping < minOrder) errors.push(`الحد الأدنى للطلب ${minOrder} ₪`);
-  for (const l of priced.lines) if (l.qty > l.stock) errors.push(`الكمية المتوفرة من "${l.name}" هي ${l.stock} فقط`);
+  for (const l of priced.lines) if (l.qty > l.stock) errors.push(l.stock > 0 ? `الكمية المتوفرة من "${l.name}${l.size ? ' – ' + l.size : ''}" هي ${l.stock} فقط` : `"${l.name}${l.size ? ' – ' + l.size : ''}" غير متوفر حالياً`);
   const account = readCustomer(req);
   const newPassword = !account && b.createAccount ? String(b.createAccount.password || '') : '';
   if (newPassword) {
@@ -301,17 +277,30 @@ api.post('/orders', rateLimiter(10, 3600e3), (req, res) => {
     id: store.id('o_'), number, customer,
     items: priced.lines.map(({ stock, ...l }) => l),
     subtotal: priced.subtotal, productDiscount: priced.productDiscount, couponCode: priced.couponCode, couponDiscount: priced.couponDiscount,
-    shipping: priced.shipping, total: priced.total, payment: 'cod', status: 'new', seen: false, adminNote: '',
+    shipping: priced.shipping, zone: priced.zone, total: priced.total, payment: 'cod', status: 'new', seen: false, adminNote: '',
     source: str(b.source, 30) || 'store', createdAt: Date.now(), history: [{ status: 'new', at: Date.now() }],
     customerId: owner ? owner.id : null, marketing: bool(b.marketing),
   };
   db().orders.push(order);
-  for (const l of priced.lines) {
-    const p = db().products.find((x) => x.id === l.productId);
-    p.stock = Math.max(0, p.stock - l.qty);
-    p.sold = (p.sold || 0) + l.qty;
-  }
+  Commerce.adjustStock(db(), order.items, -1);
   store.save();
+  notify('orders', [
+    `🛒 <b>طلب جديد #${number}</b>`,
+    `👤 ${H(customer.firstName)} ${H(customer.lastName)} – ${H(customer.town)}`,
+    `📞 ${H(customer.phone)}`,
+    `📍 ${H(customer.address)}${priced.zone ? ' (' + H(priced.zone.name) + ')' : ''}`,
+    customer.location ? `🗺 https://maps.google.com/?q=${customer.location.lat},${customer.location.lng}` : '',
+    '',
+    ...order.items.map((i) => `• ${H(i.name)}${i.size ? ' – ' + H(i.size) : ''} × ${i.qty} = ${i.lineTotal} ₪`),
+    '',
+    `💰 <b>الإجمالي: ${order.total} ₪</b> (توصيل ${order.shipping} ₪) – الدفع عند الاستلام`,
+    customer.notes ? `📝 ${H(customer.notes)}` : '',
+  ].filter((x) => x !== '').join('\n'));
+  for (const it of order.items) {
+    const p = db().products.find((x) => x.id === it.productId);
+    const left = p ? Commerce.option(p, it.variantId).stock : 99;
+    if (p && left <= num(db().settings.shop.lowStockAlert, 5)) notify('lowStock', `⚠️ مخزون منخفض: ${H(p.name)}${it.size ? ' – ' + H(it.size) : ''} (بقي ${left})`);
+  }
   res.json({ ok: true, number, total: order.total, accountCreated: Boolean(newPassword) });
 });
 
@@ -353,8 +342,28 @@ api.post('/blend-requests', rateLimiter(8, 3600e3), (req, res) => {
     .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: str(m.content, 4000) }));
   const number = store.nextNumber('blend', 500);
   db().blendRequests.push({ id: store.id('b_'), number, customer, blend, conversation, status: 'new', seen: false, adminNote: '', price: 0, createdAt: Date.now() });
+  notify('blends', [
+    `🍵 <b>طلب خلطة جديد #${number}</b> (من المستشار الذكي)`,
+    `👤 ${H(customer.firstName)} ${H(customer.lastName)} – ${H(customer.town)}`,
+    `📞 ${H(customer.phone)}`,
+    `🌿 ${H(blend.title)}`,
+    ...blend.ingredients.map((i) => `• ${H(i.name)}: ${H(i.amount)}`),
+    customer.notes ? `📝 ${H(customer.notes)}` : '',
+  ].filter(Boolean).join('\n'));
   store.save();
   res.json({ ok: true, number });
+});
+
+// ---------------------------------------------------------------- المقالات
+const publishedArticles = () => db().articles.filter((a) => a.published).sort((a, b) => b.createdAt - a.createdAt);
+const articleSummary = ({ id, slug, title, excerpt, image, createdAt, productIds }) => ({ id, slug, title, excerpt, image, createdAt, productIds: productIds || [] });
+
+api.get('/articles/:slug', (req, res) => {
+  const a = db().articles.find((x) => x.slug === req.params.slug && x.published);
+  if (!a) return res.status(404).json({ error: 'المقال غير موجود' });
+  a.views = (a.views || 0) + 1;
+  store.save();
+  res.json(a);
 });
 
 // ---------------------------------------------------------------- حساب الزبون: طلباتي والعروض
@@ -512,7 +521,7 @@ adm.get('/summary', auth(), (req, res) => {
       unseenBlends: d.blendRequests.filter((b) => !b.seen).length,
       newBlends: d.blendRequests.filter((b) => b.status === 'new').length,
       pendingReviews: d.reviews.filter((r) => !r.approved).length,
-      lowStock: d.products.filter((p) => p.active && p.stock <= num(d.settings.shop.lowStockAlert, 5)).length,
+      lowStock: d.products.filter((p) => p.active && Commerce.totalStock(p) <= num(d.settings.shop.lowStockAlert, 5)).length,
       products: d.products.length,
       ordersTotal: d.orders.length,
     },
@@ -523,7 +532,7 @@ adm.get('/summary', auth(), (req, res) => {
     days,
     topProducts: Object.entries(sales).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, qty]) => ({ name, qty })),
     recentOrders: d.orders.slice(-6).reverse(),
-    lowStockProducts: d.products.filter((p) => p.active && p.stock <= num(d.settings.shop.lowStockAlert, 5)).map((p) => ({ id: p.id, name: p.name, stock: p.stock })),
+    lowStockProducts: d.products.filter((p) => p.active && Commerce.totalStock(p) <= num(d.settings.shop.lowStockAlert, 5)).map((p) => ({ id: p.id, name: p.name, stock: Commerce.totalStock(p) })),
   });
 });
 
@@ -535,10 +544,7 @@ adm.put('/orders/:id', auth('orders'), (req, res) => {
   if (req.body.status && STATUS[req.body.status] && req.body.status !== o.status) {
     // إرجاع المخزون عند الإلغاء، وخصمه مجدداً عند التراجع عن الإلغاء
     const delta = req.body.status === 'cancelled' ? 1 : o.status === 'cancelled' ? -1 : 0;
-    if (delta) for (const it of o.items) {
-      const p = db().products.find((x) => x.id === it.productId);
-      if (p) { p.stock = Math.max(0, p.stock + delta * it.qty); p.sold = Math.max(0, (p.sold || 0) - delta * it.qty); }
-    }
+    if (delta) Commerce.adjustStock(db(), o.items, delta);
     o.status = req.body.status;
     o.history = o.history || [];
     o.history.push({ status: o.status, at: Date.now(), by: req.user.username });
@@ -631,6 +637,9 @@ crud('products', 'catalog', (b, old) => {
     price: Math.max(0, num(b.price)),
     discount: Math.max(0, Math.min(100, num(b.discount))),
     stock: Math.max(0, Math.floor(num(b.stock))),
+    variants: (Array.isArray(b.variants) ? b.variants : []).slice(0, 20).map((v) => ({
+      id: /^v_\w+$/.test(v.id || '') ? v.id : store.id('v_'), name: str(v.name, 60), price: Math.max(0, num(v.price)), stock: Math.max(0, Math.floor(num(v.stock))),
+    })).filter((v) => v.name),
     size: str(b.size, 60),
     images: (Array.isArray(b.images) ? b.images : []).map((x) => str(x, 500)).filter(Boolean).slice(0, 10),
     shortDesc: str(b.shortDesc, 300),
@@ -781,6 +790,74 @@ adm.post('/campaigns/:id/sent', auth('content'), (req, res) => {
   res.json(k);
 });
 
+// المقالات والنصائح
+crud('articles', 'content', (b, old) => {
+  const title = str(b.title, 200);
+  if (!title) throw new Error('عنوان المقال مطلوب');
+  const idv = old ? old.id : store.id('a_');
+  return {
+    id: idv, title, slug: uniqueSlug(db().articles, slugify(b.slug || title), idv), excerpt: str(b.excerpt, 400), content: str(b.content, 30000),
+    image: str(b.image, 500), productIds: (Array.isArray(b.productIds) ? b.productIds : []).map((x) => str(x, 60)).slice(0, 8),
+    published: bool(b.published), createdAt: old ? old.createdAt : Date.now(), updatedAt: Date.now(), views: old ? old.views || 0 : 0,
+  };
+});
+
+adm.post('/articles/draft', auth('content'), rateLimiter(20, 3600e3), async (req, res) => {
+  if (!ai.isConfigured()) return res.status(503).json({ error: 'الكتابة بالذكاء الاصطناعي تحتاج مفتاح ANTHROPIC_API_KEY' });
+  const topic = str(req.body.topic, 300);
+  if (topic.length < 3) return res.status(400).json({ error: 'اكتب موضوع المقال' });
+  try {
+    res.json(await ai.draftArticle(db(), topic));
+  } catch (e) {
+    console.error('AI draft error:', e.status || '', e.message);
+    res.status(502).json({ error: 'تعذّر إنشاء المسودة الآن، حاول بعد قليل' });
+  }
+});
+
+// التقارير الشهرية
+adm.get('/reports', auth('orders'), (req, res) => res.json(Commerce.report(db(), str(req.query.month, 7))));
+
+// تنبيهات تيليجرام: رمز البوت لا يُرسل كاملاً للمتصفح
+const maskToken = (t) => (t ? t.slice(0, 6) + '…' + t.slice(-4) : '');
+const notifyView = () => { const n = db().notify; return { enabled: Boolean(n.enabled), chatId: n.chatId || '', chatName: n.chatName || '', events: n.events || {}, hasToken: Boolean(n.botToken), tokenHint: maskToken(n.botToken) }; };
+
+adm.get('/notify', auth('settings'), (req, res) => res.json(notifyView()));
+adm.put('/notify', auth('settings'), (req, res) => {
+  const n = db().notify;
+  const b = req.body || {};
+  if (typeof b.botToken === 'string' && b.botToken.trim()) n.botToken = str(b.botToken, 120);
+  if (b.botToken === null) n.botToken = '';
+  if (b.chatId !== undefined) n.chatId = str(b.chatId, 40);
+  if (b.enabled !== undefined) n.enabled = bool(b.enabled);
+  if (b.events && typeof b.events === 'object') n.events = Object.fromEntries(['orders', 'blends', 'reviews', 'lowStock'].map((k) => [k, b.events[k] !== false]));
+  store.save();
+  res.json(notifyView());
+});
+adm.post('/notify/detect', auth('settings'), async (req, res) => {
+  const n = db().notify;
+  if (!n.botToken) return res.status(400).json({ error: 'أدخل رمز البوت أولاً واحفظه' });
+  try {
+    const chat = await notifyLib.detectChat(n.botToken);
+    if (!chat) return res.status(404).json({ error: 'لم نجد رسائل. افتح البوت في تيليجرام واضغط Start أو أرسل له أي رسالة، ثم أعد المحاولة' });
+    n.chatId = chat.id;
+    n.chatName = chat.name;
+    store.save();
+    res.json(notifyView());
+  } catch (e) {
+    res.status(400).json({ error: 'تعذّر الاتصال بتيليجرام: ' + e.message });
+  }
+});
+adm.post('/notify/test', auth('settings'), async (req, res) => {
+  const n = db().notify;
+  if (!n.botToken || !n.chatId) return res.status(400).json({ error: 'أكمل رمز البوت ورقم المحادثة أولاً' });
+  try {
+    await notifyLib.telegram(n.botToken, n.chatId, `✅ تم ربط تنبيهات متجر ${H(db().settings.storeName)} بنجاح!\nستصلك هنا رسالة فورية مع كل طلب جديد 🌿`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: 'فشل الإرسال: ' + e.message });
+  }
+});
+
 // المستخدمون
 adm.get('/users', auth('users'), (req, res) => res.json(db().users.map(safeUser)));
 adm.post('/users', auth('users'), (req, res) => {
@@ -862,19 +939,86 @@ app.get('/manifest.webmanifest', (req, res) => {
     icons: [{ src: s.logo && !s.logo.endsWith('.svg') ? s.logo : '/icon.svg', sizes: 'any', type: s.logo && !s.logo.endsWith('.svg') ? undefined : 'image/svg+xml', purpose: 'any' }],
   });
 });
+app.get('/vendor/qrcode.js', (req, res) => res.type('js').sendFile(require.resolve('qrcode-generator/qrcode.js')));
+app.get('/js/commerce.js', (req, res) => res.type('js').sendFile(path.join(__dirname, 'lib', 'commerce.js')));
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h', index: false }));
+
+// صفحات قابلة للأرشفة في جوجل: نضع العنوان والوصف والمحتوى داخل HTML نفسه، ثم يكمل المتجر عمله كالمعتاد
+const escAttr = (t) => String(t ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+const origin = (req) => `${req.protocol}://${req.get('host')}`;
+const absUrl = (req, u) => (!u ? '' : /^https?:/.test(u) ? u : origin(req) + (u.startsWith('/') ? u : '/' + u));
 
 function renderIndex(file) {
   const html = fs.readFileSync(path.join(__dirname, 'public', file), 'utf8');
-  return (req, res) => {
+  return (req, res, page = {}) => {
     const s = db().settings;
-    const esc = (t) => String(t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-    res.type('html').send(html.replaceAll('{{TITLE}}', esc(s.seo.title)).replaceAll('{{DESC}}', esc(s.seo.description)).replaceAll('{{THEME}}', esc(s.colors.primary)));
+    const title = page.title ? `${page.title} | ${s.storeName}` : s.seo.title;
+    let out = html.replaceAll('{{TITLE}}', escAttr(title)).replaceAll('{{DESC}}', escAttr(page.description || s.seo.description)).replaceAll('{{THEME}}', escAttr(s.colors.primary));
+    const extra = [
+      `<link rel="canonical" href="${escAttr(origin(req) + req.path)}">`,
+      page.image ? `<meta property="og:image" content="${escAttr(absUrl(req, page.image))}">` : '',
+      page.jsonld ? `<script type="application/ld+json">${JSON.stringify(page.jsonld).replace(/</g, '\\u003c')}</script>` : '',
+    ].join('');
+    out = out.replace('</head>', extra + '</head>');
+    if (page.body) out = out.replace('<main id="app" tabindex="-1"></main>', `<main id="app" tabindex="-1">${page.body}</main>`);
+    res.type('html').send(out);
   };
 }
-app.get('/admin', renderIndex('admin/index.html'));
-app.get('/admin/', renderIndex('admin/index.html'));
-app.get('*', renderIndex('index.html'));
+const renderStore = renderIndex('index.html');
+const renderAdmin = renderIndex('admin/index.html');
+
+// تحويل نص المقال (Markdown بسيط) إلى HTML للأرشفة
+function mdToHtml(text) {
+  return String(text || '').split(/\n{2,}/).map((block) => {
+    const lines = block.split('\n').map((l) => escAttr(l.trim())).filter(Boolean);
+    if (!lines.length) return '';
+    if (lines.every((l) => /^[-•*]\s+/.test(l))) return `<ul>${lines.map((l) => `<li>${l.replace(/^[-•*]\s+/, '')}</li>`).join('')}</ul>`;
+    if (/^#{1,4}\s/.test(lines[0])) return `<h2>${lines[0].replace(/^#+\s*/, '')}</h2>${lines.slice(1).map((l) => `<p>${l}</p>`).join('')}`;
+    return `<p>${lines.join('<br>')}</p>`;
+  }).join('').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+app.get('/admin', renderAdmin);
+app.get('/admin/', renderAdmin);
+
+app.get('/blog', (req, res) => renderStore(req, res, {
+  title: 'نصائح ومقالات', description: `مقالات ونصائح عن الأعشاب والطب البديل من ${db().settings.storeName}`,
+  body: `<div class="container seo-fallback"><h1>نصائح ومقالات</h1>${publishedArticles().map((a) => `<article><h2><a href="/blog/${encodeURIComponent(a.slug)}">${escAttr(a.title)}</a></h2><p>${escAttr(a.excerpt)}</p></article>`).join('')}</div>`,
+}));
+
+app.get('/blog/:slug', (req, res) => {
+  const a = db().articles.find((x) => x.slug === req.params.slug && x.published);
+  if (!a) return renderStore(req, res);
+  renderStore(req, res, {
+    title: a.title, description: a.excerpt, image: a.image,
+    jsonld: { '@context': 'https://schema.org', '@type': 'Article', headline: a.title, description: a.excerpt, image: a.image ? absUrl(req, a.image) : undefined, datePublished: new Date(a.createdAt).toISOString(), dateModified: new Date(a.updatedAt || a.createdAt).toISOString(), publisher: { '@type': 'Organization', name: db().settings.storeName } },
+    body: `<article class="container seo-fallback"><h1>${escAttr(a.title)}</h1><p>${escAttr(a.excerpt)}</p>${mdToHtml(a.content)}</article>`,
+  });
+});
+
+app.get('/product/:slug', (req, res) => {
+  const p = db().products.find((x) => x.slug === req.params.slug && x.active);
+  if (!p) return renderStore(req, res);
+  const v = publicProduct(p);
+  renderStore(req, res, {
+    title: p.name, description: p.shortDesc || p.description.slice(0, 160), image: p.images[0],
+    jsonld: { '@context': 'https://schema.org', '@type': 'Product', name: p.name, description: p.description, image: p.images.map((i) => absUrl(req, i)), offers: { '@type': 'Offer', priceCurrency: 'ILS', price: v.finalPrice, availability: v.inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' }, ...(v.reviewsCount ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: v.rating, reviewCount: v.reviewsCount } } : {}) },
+    body: `<article class="container seo-fallback"><h1>${escAttr(p.name)}</h1><p>${escAttr(p.description)}</p><p>${v.finalPrice} ₪</p></article>`,
+  });
+});
+
+app.get('/robots.txt', (req, res) => res.type('text').send(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: ${origin(req)}/sitemap.xml\n`));
+app.get('/sitemap.xml', (req, res) => {
+  const o = origin(req);
+  const urls = [
+    [o + '/', Date.now()], [o + '/blog', Date.now()],
+    ...publishedArticles().map((a) => [`${o}/blog/${encodeURIComponent(a.slug)}`, a.updatedAt || a.createdAt]),
+    ...db().products.filter((p) => p.active).map((p) => [`${o}/product/${encodeURIComponent(p.slug)}`, p.createdAt]),
+  ];
+  res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(([u, t]) => `<url><loc>${escAttr(u)}</loc><lastmod>${new Date(t).toISOString().slice(0, 10)}</lastmod></url>`).join('')}</urlset>`);
+});
+
+app.get('*', (req, res) => renderStore(req, res));
 
 process.on('SIGTERM', () => { store.flush(); process.exit(0); });
 process.on('SIGINT', () => { store.flush(); process.exit(0); });

@@ -85,10 +85,10 @@
   // ---------------------------------------------------------------- الهيكل
   const MENU = [
     ['', [['dashboard', '📊', 'الرئيسية', null]]],
-    ['المبيعات', [['orders', '🧾', 'الطلبات', 'orders'], ['blends', '🍵', 'طلبات الخلطات (AI)', 'orders'], ['customers', '👥', 'الزبائن', 'orders']]],
+    ['المبيعات', [['orders', '🧾', 'الطلبات', 'orders'], ['blends', '🍵', 'طلبات الخلطات (AI)', 'orders'], ['customers', '👥', 'الزبائن', 'orders'], ['reports', '📈', 'التقارير الشهرية', 'orders']]],
     ['الكتالوج', [['products', '📦', 'المنتجات', 'catalog'], ['categories', '🗂️', 'الأقسام', 'catalog'], ['reviews', '⭐', 'التقييمات', 'catalog']]],
-    ['المحتوى', [['slides', '🖼️', 'السلايدر', 'content'], ['popup', '📢', 'الإعلان المنبثق', 'content'], ['home', '🏠', 'الصفحة الرئيسية', 'content'], ['texts', '✏️', 'النصوص', 'content'], ['campaigns', '📣', 'الحملات والعروض', 'content']]],
-    ['الإعدادات', [['identity', '🌿', 'الاسم والشعار', 'settings'], ['design', '🎨', 'الألوان والخطوط', 'settings'], ['typography', '🔤', 'الخطوط لكل قسم', 'settings'], ['contact', '📞', 'التواصل وواتساب', 'settings'], ['shop', '🚚', 'الشحن والأسعار', 'settings'], ['coupons', '🏷️', 'كوبونات الخصم', 'settings'], ['ai', '🤖', 'المستشار الذكي', 'settings']]],
+    ['المحتوى', [['slides', '🖼️', 'السلايدر', 'content'], ['popup', '📢', 'الإعلان المنبثق', 'content'], ['home', '🏠', 'الصفحة الرئيسية', 'content'], ['texts', '✏️', 'النصوص', 'content'], ['campaigns', '📣', 'الحملات والعروض', 'content'], ['articles', '📝', 'المقالات والنصائح', 'content'], ['qr', '🔳', 'QR كود للطباعة', 'content']]],
+    ['الإعدادات', [['identity', '🌿', 'الاسم والشعار', 'settings'], ['design', '🎨', 'الألوان والخطوط', 'settings'], ['typography', '🔤', 'الخطوط لكل قسم', 'settings'], ['contact', '📞', 'التواصل وواتساب', 'settings'], ['shop', '🚚', 'الشحن والأسعار', 'settings'], ['zones', '📍', 'مناطق التوصيل', 'settings'], ['notify', '🔔', 'تنبيهات تيليجرام', 'settings'], ['coupons', '🏷️', 'كوبونات الخصم', 'settings'], ['ai', '🤖', 'المستشار الذكي', 'settings']]],
     ['النظام', [['users', '👥', 'المستخدمون', 'users'], ['backup', '💾', 'النسخ الاحتياطي', 'users'], ['account', '🔐', 'حسابي', null]]],
   ];
 
@@ -368,8 +368,8 @@
           <button class="btn" id="addP">${ICON.plus} إضافة منتج</button></div>
         <div class="table-wrap"><table><thead><tr><th></th><th>المنتج</th><th>القسم</th><th>السعر</th><th>الخصم</th><th>بعد الخصم</th><th>المخزون</th><th>المبيعات</th><th>الحالة</th><th></th></tr></thead><tbody>
         ${list.map((p) => `<tr><td><img class="thumb" src="${esc(safeUrl(p.images[0]))}" alt=""></td><td><b>${esc(p.name)}</b><div class="muted" style="font-size:.82em">${esc(p.size || '')} ${p.featured ? '• ⭐ مميز' : ''} ${p.bestseller ? '• 🔥' : ''} ${p.isNew ? '• 🆕' : ''}</div></td>
-          <td>${esc(catName[p.categoryId] || '—')}</td><td>${money(p.price)}</td><td>${p.discount ? `<span class="pill st-cancelled">${p.discount}%</span>` : '—'}</td><td><b>${money(Math.round(p.price * (1 - p.discount / 100) * 100) / 100)}</b></td>
-          <td>${p.stock <= low ? `<span class="pill ${p.stock ? 'st-new' : 'st-cancelled'}">${p.stock}</span>` : p.stock}</td><td>${p.sold || 0}</td><td>${p.active ? pill('delivered', { delivered: 'ظاهر' }) : pill('cancelled', { cancelled: 'مخفي' })}</td>
+          <td>${esc(catName[p.categoryId] || '—')}</td><td>${p.variants && p.variants.length ? `<small class="muted">${p.variants.length} أحجام، من</small> ` + money(Math.min(...p.variants.map((v) => v.price))) : money(p.price)}</td><td>${p.discount ? `<span class="pill st-cancelled">${p.discount}%</span>` : '—'}</td><td><b>${money(Math.round((p.variants && p.variants.length ? Math.min(...p.variants.map((v) => v.price)) : p.price) * (1 - p.discount / 100) * 100) / 100)}</b></td>
+          <td>${(() => { const st = p.variants && p.variants.length ? p.variants.reduce((a, v) => a + v.stock, 0) : p.stock; return st <= low ? `<span class="pill ${st ? 'st-new' : 'st-cancelled'}">${st}</span>` : st; })()}</td><td>${p.sold || 0}</td><td>${p.active ? pill('delivered', { delivered: 'ظاهر' }) : pill('cancelled', { cancelled: 'مخفي' })}</td>
           <td style="white-space:nowrap"><button class="btn btn-sec btn-icon" data-edit="${p.id}" title="تعديل">${ICON.edit}</button> <a class="btn btn-sec btn-icon" href="/#/product/${encodeURIComponent(p.slug)}" target="_blank" title="عرض">${ICON.ext}</a> <button class="btn btn-sec btn-icon" data-del="${p.id}" title="حذف">${ICON.trash}</button></td></tr>`).join('')}
         </tbody></table></div>${list.length ? '' : '<div class="empty">لا توجد منتجات</div>'}</div>`;
       $('#pq').onchange = (e) => { A.cache.prodQ = e.target.value.trim(); route(); };
@@ -424,6 +424,156 @@
       $$('[data-edit]', c).forEach((b) => (b.onclick = () => edit(list.find((k) => k.id === b.dataset.edit))));
       $$('[data-del]', c).forEach((b) => (b.onclick = async () => { if (confirmDo('حذف الحملة؟')) { await api('/campaigns/' + b.dataset.del, 'DELETE'); route(); } }));
       $$('[data-send]', c).forEach((b) => (b.onclick = () => sendCampaignModal(list.find((k) => k.id === b.dataset.send))));
+    },
+
+    async zones(c) {
+      A.settings = await api('/settings');
+      let zones = JSON.parse(JSON.stringify(A.settings.shop.zones || []));
+      const draw = () => {
+        c.innerHTML = `<div class="alert">📍 الزبون يختار منطقته عند إتمام الطلب، وسعر التوصيل يُحسب تلقائياً. إذا حذفت كل المناطق يُستعمل سعر توصيل واحد من صفحة "الشحن والأسعار" (حالياً ${money(A.settings.shop.shippingFee)}).</div>
+          <div class="card"><div class="card-head"><h3>مناطق التوصيل</h3><button class="btn btn-sec btn-sm" id="addZ">${ICON.plus} إضافة منطقة</button></div>
+          ${zones.length ? `<div class="table-wrap"><table class="var-table"><thead><tr><th>اسم المنطقة</th><th>سعر التوصيل (₪)</th><th>مجاني فوق (₪) <small class="muted">0 = حسب الإعداد العام</small></th><th></th></tr></thead><tbody>
+            ${zones.map((z, i) => `<tr><td><input class="in" data-zi="${i}" data-zk="name" value="${esc(z.name)}" placeholder="مثال: الجليل والشمال"></td><td><input class="in" type="number" min="0" data-zi="${i}" data-zk="fee" value="${z.fee}"></td><td><input class="in" type="number" min="0" data-zi="${i}" data-zk="freeOver" value="${z.freeOver || 0}"></td>
+            <td style="white-space:nowrap"><button class="btn btn-sec btn-sm" data-zup="${i}" ${i ? '' : 'disabled'}>▲</button> <button class="btn btn-sec btn-icon" data-zdel="${i}">${ICON.trash}</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد مناطق – سعر توصيل واحد لكل الطلبات</div>'}
+          </div><div class="save-bar"><button class="btn" id="saveZ">💾 حفظ المناطق</button></div>`;
+        $$('[data-zi]', c).forEach((el) => (el.oninput = () => { const z = zones[+el.dataset.zi]; z[el.dataset.zk] = el.dataset.zk === 'name' ? el.value : Number(el.value) || 0; }));
+        $$('[data-zdel]', c).forEach((b) => (b.onclick = () => { zones.splice(+b.dataset.zdel, 1); draw(); }));
+        $$('[data-zup]', c).forEach((b) => (b.onclick = () => { const i = +b.dataset.zup; [zones[i - 1], zones[i]] = [zones[i], zones[i - 1]]; draw(); }));
+        $('#addZ').onclick = () => { zones.push({ id: 'z_' + Math.random().toString(36).slice(2, 9), name: '', fee: A.settings.shop.shippingFee || 0, freeOver: 0 }); draw(); $$('[data-zk="name"]', c).pop().focus(); };
+        $('#saveZ').onclick = async () => {
+          zones = zones.filter((z) => z.name.trim()).map((z) => ({ ...z, name: z.name.trim() }));
+          try { A.settings = await api('/settings', 'PUT', { shop: { zones } }); toast('✓ تم حفظ مناطق التوصيل'); draw(); } catch (e) { toast(e.message, 'err'); }
+        };
+      };
+      draw();
+    },
+
+    async notify(c) {
+      let n = await api('/notify');
+      const EV = [['orders', '🛒 طلب جديد'], ['blends', '🍵 طلب خلطة من المستشار الذكي'], ['reviews', '⭐ تقييم جديد'], ['lowStock', '⚠️ مخزون منخفض بعد طلب']];
+      const draw = () => {
+        c.innerHTML = `<div class="card"><div class="card-head"><h3>🔔 تنبيهات فورية على تيليجرام</h3>${n.enabled && n.chatId && n.hasToken ? pill('delivered', { delivered: 'مفعّلة' }) : pill('new', { new: 'غير مفعّلة' })}</div>
+          <p>تصلك رسالة على موبايلك مع كل طلب جديد فيها اسم الزبون وتلفونه وعنوانه والمنتجات والمبلغ، حتى لو لوحة التحكم مسكّرة. تيليجرام مجاني.</p>
+          <div class="steps-guide">
+            <div><b>1</b><span>نزّل تطبيق <b>Telegram</b> على موبايلك وافتح حساب.</span></div>
+            <div><b>2</b><span>ابحث عن <b dir="ltr">@BotFather</b> واضغط Start، ثم اكتب <code dir="ltr">/newbot</code>. اختر اسماً للبوت (مثل: تنبيهات الجليل) واسم مستخدم ينتهي بـ bot.</span></div>
+            <div><b>3</b><span>BotFather يعطيك <b>رمز البوت (Token)</b> – انسخه والصقه هنا واضغط حفظ.</span></div>
+            <div><b>4</b><span>افتح البوت الجديد (الرابط يعطيك إياه BotFather) واضغط <b>Start</b>، ثم ارجع هنا واضغط "ربط المحادثة تلقائياً".</span></div>
+            <div><b>5</b><span>اضغط "إرسال رسالة تجربة" – إذا وصلتك، كل شيء جاهز ✅</span></div>
+          </div></div>
+          <div class="card"><div class="form">
+            <div class="f full"><label>رمز البوت (Bot Token)</label><input class="in" id="nToken" dir="ltr" placeholder="${n.hasToken ? 'محفوظ: ' + esc(n.tokenHint) + ' – الصق رمزاً جديداً لتغييره' : '1234567890:AA...'}" autocomplete="off"></div>
+            <div class="f"><label>رقم المحادثة (Chat ID)</label><div class="row"><input class="in" id="nChat" dir="ltr" value="${esc(n.chatId)}" style="flex:1"><button type="button" class="btn btn-sec btn-sm" id="nDetect">🔎 ربط المحادثة تلقائياً</button></div>${n.chatName ? `<div class="hint">مرتبط بـ: ${esc(n.chatName)}</div>` : '<div class="hint">لإرسال التنبيهات لأكثر من شخص: أنشئ مجموعة في تيليجرام، أضف البوت إليها، اكتب أي رسالة فيها ثم اضغط "ربط المحادثة تلقائياً".</div>'}</div>
+            <div class="f"><label>التنبيهات</label><label class="switch"><input type="checkbox" id="nEnabled" ${n.enabled ? 'checked' : ''}><i></i> تفعيل التنبيهات</label></div>
+            <div class="f full"><label>أرسل لي تنبيهاً عند:</label><div class="row">${EV.map(([k, t]) => `<label class="switch"><input type="checkbox" data-ev="${k}" ${n.events[k] !== false ? 'checked' : ''}><i></i> ${t}</label>`).join('')}</div></div>
+          </div>
+          <div class="save-bar"><button class="btn btn-sec" id="nTest">📨 إرسال رسالة تجربة</button><button class="btn" id="nSave">💾 حفظ</button></div></div>`;
+        const save = async () => {
+          const body = { chatId: $('#nChat').value.trim(), enabled: $('#nEnabled').checked, events: Object.fromEntries($$('[data-ev]', c).map((el) => [el.dataset.ev, el.checked])) };
+          if ($('#nToken').value.trim()) body.botToken = $('#nToken').value.trim();
+          n = await api('/notify', 'PUT', body);
+        };
+        $('#nSave').onclick = async () => { try { await save(); toast('✓ تم الحفظ'); draw(); } catch (e) { toast(e.message, 'err'); } };
+        $('#nDetect').onclick = async () => { try { await save(); n = await api('/notify/detect', 'POST'); toast('✓ تم ربط المحادثة: ' + (n.chatName || n.chatId)); draw(); } catch (e) { toast(e.message, 'err'); } };
+        $('#nTest').onclick = async () => { try { await save(); await api('/notify/test', 'POST'); toast('✓ أُرسلت رسالة التجربة – افحص تيليجرام'); draw(); } catch (e) { toast(e.message, 'err'); } };
+      };
+      draw();
+    },
+
+    async qr(c) {
+      A.settings = await api('/settings');
+      const products = await api('/products');
+      const base = location.origin;
+      const targets = [['/', '🏠 الصفحة الرئيسية للمتجر'], ['/#/shop', '🛍 كل المنتجات'], ['/#/shop?sale=1', '🏷 العروض'], ['/#/advisor', '🤖 المستشار الذكي'], ['/#/account', '👤 حسابي وطلباتي'], ['/blog', '📝 النصائح والمقالات'],
+        ...products.filter((p) => p.active).map((p) => [`/product/${encodeURIComponent(p.slug)}`, '📦 ' + p.name])];
+      c.innerHTML = `<div class="grid2"><div class="card"><div class="card-head"><h3>🔳 صمّم QR كود</h3></div>
+          <div class="form" style="grid-template-columns:1fr">
+            <div class="f"><label>الكود يفتح على</label><select class="sel" id="qTarget">${targets.map(([u, t]) => `<option value="${esc(u)}">${esc(t)}</option>`).join('')}<option value="custom">✏️ رابط آخر…</option></select></div>
+            <div class="f" id="qCustomBox" hidden><label>الرابط</label><input class="in" id="qCustom" dir="ltr" placeholder="https://"></div>
+            <div class="f"><label>عنوان البطاقة</label><input class="in" id="qTitle" value="امسح الكود وتسوّق من ${esc(A.settings.storeName)}"></div>
+            <div class="f"><label>سطر صغير تحت الكود</label><input class="in" id="qSub" value="أعشاب • زيوت • كريمات طبيعية • الدفع عند الاستلام"></div>
+            <div class="row"><div class="f"><label>لون الكود</label><input type="color" id="qColor" value="${esc(A.settings.colors.primary)}"></div><div class="f"><label>لون الخلفية</label><input type="color" id="qBg" value="#fbf6ea"></div></div>
+            <div class="f"><label>رابط موقعك</label><input class="in" id="qBase" dir="ltr" value="${esc(base)}"><div class="hint">بعد ربط اسم نطاق خاص (مثل aljalil.store) اكتبه هنا.</div></div>
+          </div></div>
+        <div class="card" style="text-align:center"><div class="card-head"><h3>المعاينة</h3></div>
+          <canvas id="qCard" width="1200" height="1600" style="width:100%;max-width:360px;border-radius:16px;box-shadow:var(--shadow);border:1px solid var(--line)"></canvas>
+          <div class="row" style="justify-content:center;margin-top:14px"><button class="btn" id="qDlCard">⬇ تنزيل بطاقة للطباعة</button><button class="btn btn-sec" id="qDlCode">⬇ الكود وحده (PNG)</button></div>
+          <p class="hint muted" id="qUrl" dir="ltr" style="word-break:break-all"></p></div></div>
+`;
+      if (!window.qrcode) { try { await loadScript('/vendor/qrcode.js'); } catch { c.insertAdjacentHTML('afterbegin', '<div class="alert err">تعذّر تحميل أداة QR.</div>'); return; } }
+      let codeCanvas = null;
+      const url = () => { const t = $('#qTarget').value; return t === 'custom' ? $('#qCustom').value.trim() : $('#qBase').value.trim().replace(/\/$/, '') + t; };
+      const render = () => {
+        const link = url();
+        $('#qUrl').textContent = link;
+        if (!link) return;
+        codeCanvas = drawQR(link, 900, $('#qColor').value, $('#qBg').value);
+        const cv = $('#qCard'); const x = cv.getContext('2d');
+        x.fillStyle = $('#qBg').value; x.fillRect(0, 0, 1200, 1600);
+        x.fillStyle = $('#qColor').value; x.fillRect(0, 0, 1200, 18); x.fillRect(0, 1582, 1200, 18);
+        x.direction = 'rtl'; x.textAlign = 'center'; x.fillStyle = $('#qColor').value;
+        x.font = '800 110px Tajawal, sans-serif'; x.fillText(A.settings.storeName, 600, 190);
+        x.font = '700 54px Tajawal, sans-serif'; wrapText(x, $('#qTitle').value, 600, 300, 1040, 70);
+        x.drawImage(codeCanvas, 150, 400, 900, 900);
+        x.fillStyle = '#333'; x.font = '500 40px Tajawal, sans-serif'; wrapText(x, $('#qSub').value, 600, 1400, 1040, 56);
+        x.direction = 'ltr'; x.font = '500 34px Tajawal, sans-serif'; x.fillStyle = '#666'; x.fillText(link.replace(/^https?:\/\//, '').slice(0, 60), 600, 1520);
+      };
+      ['#qTarget', '#qCustom', '#qTitle', '#qSub', '#qColor', '#qBg', '#qBase'].forEach((id) => $(id).addEventListener('input', () => { $('#qCustomBox').hidden = $('#qTarget').value !== 'custom'; render(); }));
+      await document.fonts.load('800 40px Tajawal').catch(() => {});
+      render();
+      const dl = (canvas, name) => { const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = name; a.click(); };
+      $('#qDlCard').onclick = () => dl($('#qCard'), 'qr-card.png');
+      $('#qDlCode').onclick = () => codeCanvas && dl(codeCanvas, 'qr-code.png');
+    },
+
+    async reports(c) {
+      const month = A.cache.repMonth || '';
+      const r = await api('/reports' + (month ? '?month=' + month : ''));
+      A.cache.repMonth = r.month;
+      const t = r.totals;
+      const max = Math.max(1, ...r.series.map((x) => x.revenue));
+      const ST = { new: 'جديد', confirmed: 'تم التأكيد', preparing: 'قيد التحضير', shipped: 'تم الشحن', delivered: 'تم التسليم', cancelled: 'ملغي' };
+      const table = (rows, cols) => rows.length ? `<div class="table-wrap"><table><thead><tr>${cols.map(([, h]) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((x) => `<tr>${cols.map(([k, , f]) => `<td>${f ? f(x[k]) : esc(x[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد بيانات لهذا الشهر</div>';
+      c.innerHTML = `<div class="card"><div class="card-head"><h3>📈 تقرير ${esc(r.label)}</h3><div class="row"><input type="month" class="in" id="repMonth" value="${r.month}" style="width:auto"><button class="btn btn-sec btn-sm" id="repCsv">⬇ تصدير Excel</button></div></div>
+          <div class="stats" style="margin:0">
+            <div class="stat"><div class="ic">💰</div><div><b>${money(t.revenue)}</b><small>المبيعات (بدون الملغي)</small></div></div>
+            <div class="stat"><div class="ic">✅</div><div><b>${money(t.deliveredRevenue)}</b><small>تم تحصيله (طلبات مسلّمة)</small></div></div>
+            <div class="stat"><div class="ic">🧾</div><div><b>${t.validOrders}</b><small>طلب${t.cancelled ? ` • ${t.cancelled} ملغي` : ''}</small></div></div>
+            <div class="stat"><div class="ic">🛒</div><div><b>${money(t.avgOrder)}</b><small>متوسط قيمة الطلب</small></div></div>
+            <div class="stat"><div class="ic">📦</div><div><b>${t.items}</b><small>قطعة مباعة</small></div></div>
+            <div class="stat"><div class="ic">🏷</div><div><b>${money(t.discounts)}</b><small>خصومات وكوبونات</small></div></div>
+            <div class="stat"><div class="ic">🚚</div><div><b>${money(t.shipping)}</b><small>رسوم توصيل محصّلة</small></div></div>
+            <div class="stat"><div class="ic">👥</div><div><b>${t.newCustomers}</b><small>حسابات زبائن جديدة • ${t.blendRequests} طلب خلطة</small></div></div>
+          </div></div>
+        <div class="card"><div class="card-head"><h3>المبيعات آخر 12 شهر</h3></div>
+          <div class="chart" style="height:220px">${r.series.map((x) => `<div class="bar ${x.month === r.month ? 'cur' : ''}" title="${esc(x.label)}: ${money(x.revenue)} • ${x.orders} طلب" data-m="${x.month}" style="cursor:pointer"><span>${x.revenue ? Math.round(x.revenue) : ''}</span><i style="height:${(x.revenue / max) * 100}%"></i><small>${esc(x.label.replace(/ \d{4}$/, ''))}</small></div>`).join('')}</div></div>
+        <div class="grid2">
+          <div class="card"><div class="card-head"><h3>🏆 المنتجات حسب المبيعات</h3></div>${table(r.products, [['name', 'المنتج'], ['qty', 'الكمية'], ['revenue', 'المبيعات', money]])}</div>
+          <div class="card"><div class="card-head"><h3>📍 البلدات</h3></div>${table(r.towns, [['name', 'البلدة'], ['orders', 'طلبات'], ['revenue', 'المبيعات', money]])}
+            ${r.zones.some((z) => z.name !== '—') ? `<h4 style="margin-top:16px">مناطق التوصيل</h4>${table(r.zones, [['name', 'المنطقة'], ['orders', 'طلبات'], ['revenue', 'المبيعات', money]])}` : ''}
+            <h4 style="margin-top:16px">حالات الطلبات</h4><div class="row">${Object.entries(r.statuses).map(([k, v]) => `${pill(k)} <b>${v}</b>`).join(' &nbsp; ') || '<span class="muted">—</span>'}</div></div>
+        </div>`;
+      $('#repMonth').onchange = (e) => { A.cache.repMonth = e.target.value; route(); };
+      $$('[data-m]', c).forEach((b) => (b.onclick = () => { A.cache.repMonth = b.dataset.m; route(); }));
+      $('#repCsv').onclick = () => downloadCSV('report-' + r.month, [
+        ['تقرير', r.label], [], ['المبيعات', t.revenue], ['تم تحصيله', t.deliveredRevenue], ['عدد الطلبات', t.validOrders], ['ملغي', t.cancelled], ['متوسط الطلب', t.avgOrder], ['قطع مباعة', t.items], ['خصومات', t.discounts], ['رسوم توصيل', t.shipping], [],
+        ['المنتج', 'الكمية', 'المبيعات'], ...r.products.map((x) => [x.name, x.qty, x.revenue]), [], ['البلدة', 'طلبات', 'المبيعات'], ...r.towns.map((x) => [x.name, x.orders, x.revenue]),
+      ]);
+    },
+
+    async articles(c) {
+      const [list, products, me] = await Promise.all([api('/articles'), api('/products'), api('/me')]);
+      A.cache.products = products;
+      list.sort((a, b) => b.createdAt - a.createdAt);
+      c.innerHTML = `<div class="alert">📝 المقالات تجذب زبائن جدد من بحث جوجل وتبني الثقة. كل مقال له رابط خاص تقدر تشاركه على الواتساب والفيسبوك. ${me.aiConfigured ? 'استعمل زر <b>✨ اكتب بالذكاء الاصطناعي</b> لتحصل على مسودة جاهزة تراجعها وتعدّلها.' : ''}</div>
+        <div class="card"><div class="card-head"><h3>المقالات والنصائح</h3><div class="row">${me.aiConfigured ? `<button class="btn btn-sec" id="aiDraft">✨ اكتب بالذكاء الاصطناعي</button>` : ''}<button class="btn" id="addA">${ICON.plus} مقال جديد</button></div></div>
+        ${list.length ? `<div class="table-wrap"><table><thead><tr><th></th><th>العنوان</th><th>التاريخ</th><th>المشاهدات</th><th>الحالة</th><th></th></tr></thead><tbody>${list.map((a) => `<tr><td><img class="thumb" src="${esc(safeUrl(a.image))}" alt=""></td><td><b>${esc(a.title)}</b><div class="muted" style="font-size:.82em">${esc(a.excerpt)}</div></td><td>${dt(a.createdAt)}</td><td>${a.views || 0}</td>
+          <td>${a.published ? pill('delivered', { delivered: 'منشور' }) : pill('new', { new: 'مسودة' })}</td>
+          <td style="white-space:nowrap"><button class="btn btn-sec btn-icon" data-edit="${a.id}">${ICON.edit}</button> <a class="btn btn-sec btn-icon" href="/blog/${encodeURIComponent(a.slug)}" target="_blank">${ICON.ext}</a> <button class="btn btn-sec btn-icon" data-del="${a.id}">${ICON.trash}</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا توجد مقالات بعد</div>'}</div>`;
+      $('#addA').onclick = () => articleModal(null);
+      $('#aiDraft')?.addEventListener('click', () => aiDraftModal());
+      $$('[data-edit]', c).forEach((b) => (b.onclick = () => articleModal(list.find((a) => a.id === b.dataset.edit))));
+      $$('[data-del]', c).forEach((b) => (b.onclick = async () => { if (confirmDo('حذف المقال؟')) { await api('/articles/' + b.dataset.del, 'DELETE'); route(); } }));
     },
 
     async categories(c) {
@@ -500,7 +650,7 @@
 
     async home(c) {
       A.settings = await api('/settings');
-      const names = { slider: '🖼️ السلايدر الرئيسي', features: '✨ شريط المزايا', categories: '🗂️ الأقسام', featured: '⭐ منتجات مختارة', advisor: '🤖 بانر المستشار الذكي', offers: '🏷️ العروض والخصومات', bestsellers: '🔥 الأكثر مبيعاً', testimonials: '💬 آراء الزبائن' };
+      const names = { slider: '🖼️ السلايدر الرئيسي', features: '✨ شريط المزايا', categories: '🗂️ الأقسام', featured: '⭐ منتجات مختارة', advisor: '🤖 بانر المستشار الذكي', offers: '🏷️ العروض والخصومات', bestsellers: '🔥 الأكثر مبيعاً', testimonials: '💬 آراء الزبائن', articles: '📝 المقالات والنصائح' };
       let secs = A.settings.home.sections.slice();
       let feats = A.settings.home.features.slice();
       const draw = () => {
@@ -532,6 +682,7 @@
         { k: 'texts.featuredTitle', label: 'عنوان المنتجات المختارة' }, { k: 'texts.featuredSubtitle', label: 'وصف المنتجات المختارة' },
         { k: 'texts.offersTitle', label: 'عنوان العروض' }, { k: 'texts.offersSubtitle', label: 'وصف العروض' },
         { k: 'texts.bestsellersTitle', label: 'عنوان الأكثر مبيعاً' }, { k: 'texts.testimonialsTitle', label: 'عنوان آراء الزبائن' },
+        { k: 'texts.articlesTitle', label: 'عنوان المقالات' }, { k: 'texts.articlesSubtitle', label: 'وصف المقالات' },
       ]],
       ['بانر المستشار الذكي', [
         { k: 'texts.advisorTitle', label: 'العنوان', full: true }, { k: 'texts.advisorText', label: 'النص', type: 'textarea' }, { k: 'texts.advisorButton', label: 'نص الزر' },
@@ -769,6 +920,7 @@
           <dt>الموقع</dt><dd>${loc ? `<a href="${loc}" target="_blank" rel="noopener">📍 فتح على الخريطة</a> <span class="muted">(دقة ${c.location.accuracy || '?'} م)</span>` : ''}${c.locationLink ? `<div><a href="${esc(safeUrl(c.locationLink) || '#')}" target="_blank" rel="noopener">🔗 رابط الموقع من الزبون</a></div>` : ''}${!loc && !c.locationLink ? '<span class="muted">لم يحدد</span>' : ''}</dd>
           ${c.notes ? `<dt>ملاحظات</dt><dd>${esc(c.notes)}</dd>` : ''}
           <dt>تاريخ الطلب</dt><dd>${dt(o.createdAt)}</dd>
+          ${o.zone ? `<dt>منطقة التوصيل</dt><dd>${esc(o.zone.name)}</dd>` : ''}
           <dt>الدفع</dt><dd>💵 عند الاستلام</dd></dl></div>
         <div class="no-print"><h4>⚙️ إدارة الطلب</h4>
           <div class="f"><label>حالة الطلب</label><select class="sel" id="oStatus">${Object.entries(STATUS).map(([k, t]) => `<option value="${k}" ${o.status === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
@@ -833,6 +985,79 @@
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     a.download = `orders-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
+  }
+
+  // ---------------------------------------------------------------- أدوات: QR والمقالات
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) return resolve();
+      const sc = document.createElement('script');
+      sc.src = src; sc.onload = resolve; sc.onerror = reject;
+      document.head.append(sc);
+    });
+  }
+  // رسم QR على canvas بمكتبة qrcode-generator (مستوى تصحيح عالٍ H)
+  function drawQR(text, size, dark, light) {
+    qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+    const qr = qrcode(0, 'H');
+    qr.addData(text);
+    qr.make();
+    const n = qr.getModuleCount();
+    const quiet = 4;
+    const cell = size / (n + quiet * 2);
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const x = cv.getContext('2d');
+    x.fillStyle = light; x.fillRect(0, 0, size, size);
+    x.fillStyle = dark;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) x.fillRect(Math.floor((c + quiet) * cell), Math.floor((r + quiet) * cell), Math.ceil(cell), Math.ceil(cell));
+    return cv;
+  }
+  function wrapText(ctx, text, x, y, maxW, lineH) {
+    const words = String(text).split(' ');
+    let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, y); line = w; y += lineH; } else line = test;
+    }
+    if (line) ctx.fillText(line, x, y);
+  }
+
+  function articleModal(a, draft) {
+    const d = a ? JSON.parse(JSON.stringify(a)) : { published: true, productIds: [], ...(draft || {}) };
+    const prods = (A.cache.products || []).filter((p) => p.active);
+    const m = modal(a ? 'تعديل مقال' : 'مقال جديد', `<form id="aform" class="form">
+        ${fieldHTML({ k: 'title', label: 'العنوان', full: true }, d.title)}
+        ${fieldHTML({ k: 'excerpt', label: 'ملخص قصير (يظهر في جوجل وفي البطاقات)', type: 'textarea', rows: 2 }, d.excerpt)}
+        ${fieldHTML({ k: 'content', label: 'نص المقال', type: 'textarea', rows: 16, hint: 'للعناوين الفرعية ابدأ السطر بـ ## ، وللقوائم ابدأ السطر بـ - ، وللخط العريض ضع النص بين ** **. اترك سطراً فارغاً بين الفقرات.' }, d.content)}
+        ${fieldHTML({ k: 'image', label: 'صورة المقال', type: 'image', full: true }, d.image)}
+        <div class="f full"><label>منتجات تظهر أسفل المقال</label><div class="prod-picks">${prods.map((p) => `<label class="pick"><input type="checkbox" value="${p.id}" ${d.productIds.includes(p.id) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')}</div></div>
+        ${fieldHTML({ k: 'published', label: 'منشور (ظاهر للزوار)', type: 'bool' }, d.published)}
+      </form>`, `<button class="btn btn-sec" data-mclose>إلغاء</button><button class="btn" id="aSave">💾 حفظ المقال</button>`);
+    bindUploads(m);
+    $('#aSave', m).onclick = async () => {
+      const out = readFields($('#aform', m), d);
+      out.productIds = $$('.prod-picks input:checked', m).map((x) => x.value);
+      try { await api(a ? '/articles/' + a.id : '/articles', a ? 'PUT' : 'POST', out); toast('✓ تم حفظ المقال'); closeModal(); route(); } catch (e) { toast(e.message, 'err'); }
+    };
+  }
+
+  function aiDraftModal() {
+    const m = modal('✨ مقال بالذكاء الاصطناعي', `<p class="muted">اكتب موضوع المقال، وخلال دقيقة تحصل على مسودة كاملة تراجعها وتعدّلها قبل النشر.</p>
+      <div class="f"><label>الموضوع</label><input class="in" id="aiTopic" placeholder="مثال: فوائد الزنجبيل للمناعة في الشتاء"></div>
+      <div class="row" style="margin-top:10px">${['أعشاب لتخفيف القولون العصبي', 'طرق طبيعية لتقوية الشعر', 'فوائد زيت الزيتون للبشرة', 'مشروبات دافئة للمناعة في الشتاء'].map((x) => `<button type="button" class="btn btn-sec btn-sm" data-topic="${esc(x)}">${esc(x)}</button>`).join('')}</div>`,
+      `<button class="btn btn-sec" data-mclose>إلغاء</button><button class="btn" id="aiGo">✨ اكتب المسودة</button>`, 'sm');
+    $$('[data-topic]', m).forEach((b) => (b.onclick = () => ($('#aiTopic', m).value = b.dataset.topic)));
+    $('#aiGo', m).onclick = async () => {
+      const btn = $('#aiGo', m);
+      btn.disabled = true; btn.textContent = 'جارٍ الكتابة… (قد يستغرق دقيقة)';
+      try {
+        const r = await api('/articles/draft', 'POST', { topic: $('#aiTopic', m).value });
+        closeModal();
+        articleModal(null, { ...r, published: false });
+        toast('✓ المسودة جاهزة – راجعها ثم احفظ');
+      } catch (e) { toast(e.message, 'err'); btn.disabled = false; btn.textContent = '✨ اكتب المسودة'; }
+    };
   }
 
   // ---------------------------------------------------------------- الحملات والزبائن
@@ -910,6 +1135,7 @@
 
   function productModal(p) {
     const d = p ? JSON.parse(JSON.stringify(p)) : { active: true, images: [], benefits: [], discount: 0, stock: 10, categoryId: (A.cache.categories[0] || {}).id };
+    d.variants = d.variants || [];
     const cats = A.cache.categories.map((k) => [k.id, k.name]);
     const fields1 = [
       { k: 'name', label: 'اسم المنتج', full: true },
@@ -926,6 +1152,9 @@
     ];
     const m = modal(p ? 'تعديل منتج' : 'منتج جديد', `<form id="pform" class="form">${fields1.map((f) => fieldHTML(f, get(d, f.k))).join('')}
       <div class="f full"><label>السعر بعد الخصم</label><div id="finalP" style="font-weight:800;font-size:1.2em;color:var(--p)"></div></div>
+      <div class="f full"><label>الأحجام (اختياري)</label>
+        <div class="hint" style="margin:0 0 8px">للمنتجات المتوفرة بأكثر من حجم (مثل 30 مل و100 مل). لكل حجم سعره ومخزونه، ونسبة الخصم أعلاه تنطبق على كل الأحجام. إذا أضفت أحجاماً يُتجاهل السعر والمخزون العامّان.</div>
+        <div id="variants"></div><button type="button" class="btn btn-sec btn-sm" id="addVar">${ICON.plus} إضافة حجم</button></div>
       <div class="f full"><label>صور المنتج (الأولى هي الرئيسية)</label><div class="imgs-list" id="imgs"></div>
         <div class="row" style="margin-top:8px"><input class="in" id="imgUrl" placeholder="أو الصق رابط صورة" dir="ltr" style="flex:1"><button type="button" class="btn btn-sec btn-sm" id="imgUrlAdd">إضافة الرابط</button></div></div>
       ${fields2.map((f) => fieldHTML(f, get(d, f.k))).join('')}</form>`,
@@ -945,9 +1174,23 @@
       };
     };
     drawImgs();
+    // محرر الأحجام
+    const syncVariants = () => $$('[data-vi]', m).forEach((el) => { const v = d.variants[+el.dataset.vi]; v[el.dataset.vk] = el.dataset.vk === 'name' ? el.value : Number(el.value) || 0; });
+    const drawVariants = () => {
+      $('#variants', m).innerHTML = d.variants.length ? `<table class="var-table"><thead><tr><th>الحجم</th><th>السعر (₪)</th><th>المخزون</th><th></th></tr></thead><tbody>${d.variants.map((v, i) => `<tr>
+        <td><input class="in" data-vi="${i}" data-vk="name" value="${esc(v.name)}" placeholder="مثال: 100 مل"></td>
+        <td><input class="in" type="number" min="0" data-vi="${i}" data-vk="price" value="${v.price}"></td>
+        <td><input class="in" type="number" min="0" data-vi="${i}" data-vk="stock" value="${v.stock}"></td>
+        <td><button type="button" class="btn btn-sec btn-icon" data-vdel="${i}">${ICON.trash}</button></td></tr>`).join('')}</tbody></table>` : '';
+      $$('[data-vdel]', m).forEach((b) => (b.onclick = () => { syncVariants(); d.variants.splice(+b.dataset.vdel, 1); drawVariants(); }));
+    };
+    drawVariants();
+    $('#addVar', m).onclick = () => { syncVariants(); d.variants.push({ name: '', price: Number($('[data-k="price"]', m).value) || 0, stock: 10 }); drawVariants(); $$('[data-vk="name"]', m).pop().focus(); };
     $('#imgUrlAdd').onclick = () => { const u = $('#imgUrl').value.trim(); if (safeUrl(u)) { d.images.push(u); $('#imgUrl').value = ''; drawImgs(); } else toast('رابط غير صالح', 'err'); };
     $('#pSave', m).onclick = async () => {
-      const out = readFields($('#pform', m), d);
+      syncVariants();
+    const out = readFields($('#pform', m), d);
+    out.variants = d.variants.filter((v) => v.name.trim());
       try { await api(p ? '/products/' + p.id : '/products', p ? 'PUT' : 'POST', out); toast('✓ تم حفظ المنتج'); closeModal(); route(); } catch (e) { toast(e.message, 'err'); }
     };
   }

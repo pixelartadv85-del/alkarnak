@@ -2,7 +2,7 @@
 // يُحقن قبل store.js / admin.js بواسطة scripts/build-demo.js، ويحتاج window.__DEMO_SEED__.
 (() => {
   'use strict';
-  const KEY = 'jalil-demo-db-v2';
+  const KEY = 'jalil-demo-db-v3';
   const SESSION = 'jalil-demo-session';
   const CSESSION = 'jalil-demo-customer';
   const round2 = (n) => Math.round(n * 100) / 100;
@@ -22,48 +22,20 @@
     if (!mem) mem = JSON.parse(JSON.stringify(window.__DEMO_SEED__));
     mem.customers = mem.customers || [];
     mem.campaigns = mem.campaigns || [];
+    mem.articles = mem.articles || [];
+    mem.notify = mem.notify || { enabled: false, chatId: '', events: {} };
     return mem;
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch { /* التخزين ممتلئ أو غير متاح */ } }
   window.addEventListener('storage', (e) => { if (e.key === KEY) mem = null; });
 
-  const finalPrice = (p) => round2(p.price * (1 - Math.min(100, Math.max(0, p.discount || 0)) / 100));
+  const C = window.Commerce;
   function rating(pid) {
     const rs = db().reviews.filter((r) => r.productId === pid && r.approved);
     return { rating: rs.length ? round2(rs.reduce((a, r) => a + r.rating, 0) / rs.length) : 0, reviewsCount: rs.length };
   }
-  const publicProduct = (p) => ({ ...p, finalPrice: finalPrice(p), inStock: p.stock > 0, ...rating(p.id) });
-
-  function findCoupon(code) {
-    const c = db().coupons.find((k) => k.active && k.code.toLowerCase() === String(code).trim().toLowerCase());
-    if (!c || (c.expires && new Date(c.expires + 'T23:59:59') < new Date())) return null;
-    return c;
-  }
-  function priceCart(items, couponCode) {
-    const s = db().settings.shop;
-    const lines = [];
-    for (const it of items || []) {
-      const p = db().products.find((x) => x.id === it.id && x.active);
-      if (!p) continue;
-      const qty = Math.max(1, Math.min(99, Math.floor(num(it.qty, 1))));
-      const unit = finalPrice(p);
-      lines.push({ productId: p.id, name: p.name, size: p.size || '', image: p.images[0] || '', price: p.price, discount: p.discount || 0, unitFinal: unit, qty, lineTotal: round2(unit * qty), stock: p.stock });
-    }
-    const subtotal = round2(lines.reduce((a, l) => a + l.price * l.qty, 0));
-    const productDiscount = round2(lines.reduce((a, l) => a + (l.price - l.unitFinal) * l.qty, 0));
-    const after = round2(subtotal - productDiscount);
-    let coupon = null, couponDiscount = 0, couponError = '';
-    if (couponCode) {
-      const c = findCoupon(couponCode);
-      if (!c) couponError = 'كود الخصم غير صالح أو منتهي';
-      else if (after < (c.minTotal || 0)) couponError = `هذا الكود يتطلب طلباً بقيمة ${c.minTotal} ₪ على الأقل`;
-      else { coupon = c; couponDiscount = c.type === 'percent' ? round2((after * c.value) / 100) : Math.min(after, c.value); }
-    }
-    const net = round2(after - couponDiscount);
-    const freeOver = num(s.freeShippingOver);
-    const shipping = !lines.length ? 0 : freeOver > 0 && net >= freeOver ? 0 : num(s.shippingFee);
-    return { lines, subtotal, productDiscount, couponCode: coupon ? coupon.code : '', couponDiscount, couponError, shipping, total: round2(net + shipping) };
-  }
+  const publicProduct = (p) => { const dp = C.displayPrice(p); const stock = C.totalStock(p); return { ...p, price: dp.price, finalPrice: dp.finalPrice, fromPrice: dp.from, stock, inStock: stock > 0, ...rating(p.id) }; };
+  const priceCart = (items, coupon, zone) => C.priceCart(db(), items, coupon, zone);
   const nextNumber = (k, start) => { const d = db(); d.counters = d.counters || {}; d.counters[k] = (d.counters[k] || start) + 1; return d.counters[k]; };
 
   // ردود تجريبية للمستشار (النسخة الحقيقية تستعمل الذكاء الاصطناعي)
@@ -106,13 +78,17 @@
   const lines = (v) => (Array.isArray(v) ? v : String(v || '').split('\n')).map((x) => str(x, 300)).filter(Boolean);
   const slug = (s) => String(s).trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '') || uid('');
   const CLEAN = {
+    articles: (b, old) => {
+      if (!str(b.title)) throw new HttpError(400, 'عنوان المقال مطلوب');
+      return { id: old ? old.id : uid('a_'), title: str(b.title, 200), slug: old ? old.slug : slug(b.title), excerpt: str(b.excerpt, 400), content: str(b.content, 30000), image: str(b.image, 2e6), productIds: (b.productIds || []).slice(0, 8), published: bool(b.published), createdAt: old ? old.createdAt : Date.now(), updatedAt: Date.now(), views: old ? old.views || 0 : 0 };
+    },
     campaigns: (b, old) => {
       if (!str(b.title)) throw new HttpError(400, 'عنوان الحملة مطلوب');
       return { id: old ? old.id : uid('m_'), title: str(b.title, 150), text: str(b.text, 3000), image: str(b.image, 2e6), link: str(b.link, 400), linkText: str(b.linkText, 60), active: bool(b.active), createdAt: old ? old.createdAt : Date.now(), sentTo: old ? old.sentTo || [] : [] };
     },
     products: (b, old) => {
       if (!str(b.name)) throw new HttpError(400, 'اسم المنتج مطلوب');
-      return { ...(old || { createdAt: Date.now(), sold: 0, id: uid('p_') }), name: str(b.name, 150), slug: old ? old.slug : slug(b.name), categoryId: str(b.categoryId), price: Math.max(0, num(b.price)), discount: Math.max(0, Math.min(100, num(b.discount))), stock: Math.max(0, Math.floor(num(b.stock))), size: str(b.size), images: (b.images || []).filter(Boolean).slice(0, 10), shortDesc: str(b.shortDesc), description: str(b.description, 5000), benefits: lines(b.benefits), usage: str(b.usage, 2000), ingredients: str(b.ingredients, 2000), warnings: str(b.warnings, 2000), featured: bool(b.featured), bestseller: bool(b.bestseller), isNew: bool(b.isNew), active: bool(b.active) };
+      return { ...(old || { createdAt: Date.now(), sold: 0, id: uid('p_') }), name: str(b.name, 150), slug: old ? old.slug : slug(b.name), categoryId: str(b.categoryId), price: Math.max(0, num(b.price)), discount: Math.max(0, Math.min(100, num(b.discount))), stock: Math.max(0, Math.floor(num(b.stock))), variants: (b.variants || []).filter((v) => str(v.name)).map((v) => ({ id: v.id || uid('v_'), name: str(v.name, 60), price: Math.max(0, num(v.price)), stock: Math.max(0, Math.floor(num(v.stock))) })), size: str(b.size), images: (b.images || []).filter(Boolean).slice(0, 10), shortDesc: str(b.shortDesc), description: str(b.description, 5000), benefits: lines(b.benefits), usage: str(b.usage, 2000), ingredients: str(b.ingredients, 2000), warnings: str(b.warnings, 2000), featured: bool(b.featured), bestseller: bool(b.bestseller), isNew: bool(b.isNew), active: bool(b.active) };
     },
     categories: (b, old) => {
       if (!str(b.name)) throw new HttpError(400, 'اسم القسم مطلوب');
@@ -135,6 +111,7 @@
       products: d.products.filter((p) => p.active).map(publicProduct), slides: d.slides.filter((s) => s.active).sort((a, b) => a.order - b.order),
       testimonials: d.reviews.filter((r) => r.approved && r.rating >= 4).sort((a, b) => b.createdAt - a.createdAt).slice(0, 9).map((r) => ({ ...r, productName: (d.products.find((p) => p.id === r.productId) || {}).name || '' })),
       aiAvailable: d.settings.ai.enabled,
+      articles: d.articles.filter((a) => a.published).sort((a, b) => b.createdAt - a.createdAt).map(({ content, ...a }) => a),
     };
     if ((m = path.match(/^\/public\/products\/([^/]+)\/reviews$/))) {
       if (method === 'GET') return d.reviews.filter((r) => r.productId === m[1] && r.approved).sort((a, b) => b.createdAt - a.createdAt);
@@ -143,7 +120,12 @@
       d.reviews.push({ id: uid('r_'), productId: m[1], name: str(body.name, 60), town: str(body.town, 60), rating: Math.max(1, Math.min(5, Math.round(num(body.rating, 5)))), text: str(body.text, 1000), approved, createdAt: Date.now() });
       save(); return { ok: true, approved };
     }
-    if (path === '/public/cart/price') return priceCart(body.items, body.coupon);
+    if (path === '/public/cart/price') return priceCart(body.items, body.coupon, body.zone);
+    if ((m = path.match(/^\/public\/articles\/(.+)$/))) {
+      const a = d.articles.find((x) => x.slug === decodeURIComponent(m[1]) && x.published);
+      if (!a) throw new HttpError(404, 'المقال غير موجود');
+      return a;
+    }
     if (path === '/public/orders') {
       const c = body.customer || {};
       const customer = { firstName: str(c.firstName, 60), lastName: str(c.lastName, 60), town: str(c.town, 80), address: str(c.address, 300), phone: normPhone(c.phone), phone2: normPhone(c.phone2), notes: str(c.notes, 1000), location: c.location || null, locationLink: str(c.locationLink, 400) };
@@ -153,7 +135,8 @@
       if (!customer.town) errs.push('البلدة مطلوبة');
       if (!customer.address) errs.push('العنوان مطلوب');
       if (!PHONE_RE.test(customer.phone)) errs.push('رقم الهاتف غير صحيح');
-      const pr = priceCart(body.items, body.coupon);
+      const pr = priceCart(body.items, body.coupon, body.zone);
+      if (pr.needsZone) errs.push('يرجى اختيار منطقة التوصيل');
       if (!pr.lines.length) errs.push('السلة فارغة');
       for (const l of pr.lines) if (l.qty > l.stock) errs.push(`الكمية المتوفرة من "${l.name}" هي ${l.stock} فقط`);
       let owner = getCustomer();
@@ -163,8 +146,8 @@
       if (pw) { owner = { id: uid('cu_'), firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone, town: customer.town, address: customer.address, marketing: bool(body.marketing), password: pw, createdAt: Date.now() }; d.customers.push(owner); setCustomer(owner); }
       else if (owner && bool(body.marketing)) owner.marketing = true;
       const number = nextNumber('order', 1000);
-      d.orders.push({ id: uid('o_'), number, customer, items: pr.lines.map(({ stock, ...l }) => l), subtotal: pr.subtotal, productDiscount: pr.productDiscount, couponCode: pr.couponCode, couponDiscount: pr.couponDiscount, shipping: pr.shipping, total: pr.total, payment: 'cod', status: 'new', seen: false, adminNote: '', createdAt: Date.now(), history: [{ status: 'new', at: Date.now() }], customerId: owner ? owner.id : null, marketing: bool(body.marketing) });
-      for (const l of pr.lines) { const p = d.products.find((x) => x.id === l.productId); p.stock = Math.max(0, p.stock - l.qty); p.sold = (p.sold || 0) + l.qty; }
+      d.orders.push({ id: uid('o_'), number, customer, items: pr.lines.map(({ stock, ...l }) => l), subtotal: pr.subtotal, productDiscount: pr.productDiscount, couponCode: pr.couponCode, couponDiscount: pr.couponDiscount, shipping: pr.shipping, zone: pr.zone, total: pr.total, payment: 'cod', status: 'new', seen: false, adminNote: '', createdAt: Date.now(), history: [{ status: 'new', at: Date.now() }], customerId: owner ? owner.id : null, marketing: bool(body.marketing) });
+      C.adjustStock(d, pr.lines, -1);
       save(); return { ok: true, number, total: pr.total, accountCreated: !!pw };
     }
     if (path === '/public/track') {
@@ -249,7 +232,7 @@
       for (const o of valid) for (const it of o.items) sales[it.name] = (sales[it.name] || 0) + it.qty;
       const low = num(d.settings.shop.lowStockAlert, 5);
       return {
-        counts: { newOrders: d.orders.filter((o) => o.status === 'new').length, unseenOrders: d.orders.filter((o) => !o.seen).length, unseenBlends: d.blendRequests.filter((b) => !b.seen).length, newBlends: d.blendRequests.filter((b) => b.status === 'new').length, pendingReviews: d.reviews.filter((r) => !r.approved).length, lowStock: d.products.filter((p) => p.active && p.stock <= low).length },
+        counts: { newOrders: d.orders.filter((o) => o.status === 'new').length, unseenOrders: d.orders.filter((o) => !o.seen).length, unseenBlends: d.blendRequests.filter((b) => !b.seen).length, newBlends: d.blendRequests.filter((b) => b.status === 'new').length, pendingReviews: d.reviews.filter((r) => !r.approved).length, lowStock: d.products.filter((p) => p.active && C.totalStock(p) <= low).length },
         todayOrders: valid.filter((o) => o.createdAt >= today.getTime()).length,
         todayRevenue: round2(valid.filter((o) => o.createdAt >= today.getTime()).reduce((a, o) => a + o.total, 0)),
         totalRevenue: round2(valid.filter((o) => o.status === 'delivered').reduce((a, o) => a + o.total, 0)),
@@ -266,7 +249,7 @@
       const o = d.orders.find((x) => x.id === m[1]);
       if (body.status && STATUS[body.status] && body.status !== o.status) {
         const delta = body.status === 'cancelled' ? 1 : o.status === 'cancelled' ? -1 : 0;
-        if (delta) for (const it of o.items) { const p = d.products.find((x) => x.id === it.productId); if (p) p.stock = Math.max(0, p.stock + delta * it.qty); }
+        if (delta) C.adjustStock(d, o.items, delta);
         o.status = body.status; o.history.push({ status: o.status, at: Date.now(), by: u.username });
       }
       if ('adminNote' in body) o.adminNote = str(body.adminNote, 2000);
@@ -316,9 +299,9 @@
       if ('seen' in body) b.seen = bool(body.seen);
       save(); return b;
     }
-    if ((m = path.match(/^\/admin\/(products|categories|slides|coupons|campaigns)(?:\/(.+))?$/))) {
+    if ((m = path.match(/^\/admin\/(products|categories|slides|coupons|campaigns|articles)(?:\/(.+))?$/))) {
       const [, coll, id] = m;
-      need(coll === 'coupons' ? 'settings' : coll === 'slides' || coll === 'campaigns' ? 'content' : 'catalog');
+      need(coll === 'coupons' ? 'settings' : ['slides', 'campaigns', 'articles'].includes(coll) ? 'content' : 'catalog');
       if (method === 'GET') return d[coll];
       if (method === 'DELETE') { d[coll] = d[coll].filter((x) => x.id !== id); save(); return { ok: true }; }
       if (method === 'POST') { const it = CLEAN[coll](body, null); d[coll].push(it); save(); return it; }
@@ -358,6 +341,15 @@
       if (body.password) u.password = String(body.password);
       save(); return safeUser(u);
     }
+    if (path === '/admin/reports') { need('orders'); return C.report(d, q.get('month') || ''); }
+    if (path === '/admin/articles/draft') throw new HttpError(503, 'الكتابة بالذكاء الاصطناعي تعمل في الموقع الحقيقي بعد إضافة مفتاح ANTHROPIC_API_KEY');
+    if (path === '/admin/notify') {
+      need('settings');
+      const n = d.notify;
+      if (method === 'PUT') { if (body.botToken) n.botToken = body.botToken; if (body.chatId !== undefined) n.chatId = str(body.chatId, 40); if (body.enabled !== undefined) n.enabled = bool(body.enabled); if (body.events) n.events = body.events; save(); }
+      return { enabled: !!n.enabled, chatId: n.chatId || '', chatName: '', events: n.events || {}, hasToken: !!n.botToken, tokenHint: n.botToken ? n.botToken.slice(0, 6) + '…' : '' };
+    }
+    if (path === '/admin/notify/detect' || path === '/admin/notify/test') throw new HttpError(400, 'تيليجرام يعمل في الموقع الحقيقي فقط، وليس في النسخة التجريبية');
     if (path === '/admin/upload') { need(); return { url: String(body.data || '') }; }
     if (path === '/admin/restore') { need('users'); mem = body; save(); return { ok: true }; }
     throw new HttpError(404, 'غير موجود');
