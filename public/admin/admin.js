@@ -395,11 +395,12 @@
         ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الهاتف</th><th>البلدة</th><th>الحساب</th><th>العروض</th><th>الطلبات</th><th>مجموع المشتريات</th><th>آخر طلب</th><th></th></tr></thead><tbody>
           ${shown.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td dir="ltr" style="text-align:end">${esc(x.phone)}</td><td>${esc(x.town)}</td><td>${x.account ? pill('delivered', { delivered: 'حساب' }) : '<span class="muted">زائر</span>'}</td>
             <td><label class="switch"><input type="checkbox" data-mk="${esc(x.phone)}" ${x.marketing ? 'checked' : ''}><i></i></label></td><td>${x.orders}</td><td>${money(x.spent)}</td><td>${x.lastOrderAt ? dt(x.lastOrderAt) : '—'}</td>
-            <td><a class="btn btn-wa btn-sm" target="_blank" rel="noopener" href="${esc(waTo(x.phone, `مرحباً ${x.name.split(' ')[0]}، معك متجر ${A.settings.storeName} 🌿`))}">💬</a></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد زبائن هنا بعد</div>'}</div>
+            <td style="white-space:nowrap"><a class="btn btn-wa btn-sm" target="_blank" rel="noopener" href="${esc(waTo(x.phone, `مرحباً ${x.name.split(' ')[0]}، معك متجر ${A.settings.storeName} 🌿`))}">💬</a>${x.account ? ` <button class="btn btn-sec btn-sm" data-pw="${esc(x.phone)}" title="كلمة مرور جديدة">🔑</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">لا يوجد زبائن هنا بعد</div>'}</div>
         <div class="alert" style="margin-top:18px">💡 "نسخ أرقام المشتركين" ينسخ أرقام كل من وافق على استلام العروض، لتلصقها في <b>قائمة بث (Broadcast)</b> بواتساب بزنس وترسل لهم رسالة واحدة دفعة واحدة. لا ترسل عروضاً لمن لم يوافق.</div>`;
       $$('[data-f]', c).forEach((b) => (b.onclick = () => { A.cache.custF = b.dataset.f; route(); }));
       $('#cq').onchange = (e) => { A.cache.custQ = e.target.value.trim(); route(); };
       $$('[data-mk]', c).forEach((el) => (el.onchange = async () => { try { await api('/customers/' + encodeURIComponent(el.dataset.mk), 'PUT', { marketing: el.checked }); toast(el.checked ? '✓ تم الاشتراك' : 'تم إلغاء الاشتراك'); } catch (e) { toast(e.message, 'err'); } }));
+      $$('[data-pw]', c).forEach((b) => (b.onclick = () => resetCustomerPassword(list.find((x) => x.phone === b.dataset.pw))));
       $('#copyNums').onclick = () => copyText(subs.map((x) => '+' + intlPhone(x.phone)).join('\n'), `تم نسخ ${subs.length} رقم`);
       $('#custCsv').onclick = () => downloadCSV('customers', [['الاسم', 'الهاتف', 'البلدة', 'حساب', 'مشترك بالعروض', 'عدد الطلبات', 'مجموع المشتريات']].concat(shown.map((x) => [x.name, x.phone, x.town, x.account ? 'نعم' : 'لا', x.marketing ? 'نعم' : 'لا', x.orders, x.spent])));
     },
@@ -851,6 +852,25 @@
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
+  }
+
+  // زبون نسي كلمة المرور: نعطيه كلمة جديدة ونرسلها له على واتساب
+  function resetCustomerPassword(x) {
+    const gen = String(Math.floor(100000 + Math.random() * 900000));
+    const m = modal(`🔑 كلمة مرور جديدة – ${esc(x.name)}`, `
+      <p class="muted">اكتب كلمة مرور جديدة للزبون أو استعمل المقترحة، ثم أرسلها له على واتساب. كلمة المرور القديمة تتوقف عن العمل.</p>
+      <div class="f"><label>كلمة المرور الجديدة</label><input class="in" id="npw" value="${gen}" dir="ltr" style="font-size:1.3em;letter-spacing:3px;font-weight:800"></div>
+      <div id="pwDone" style="margin-top:14px"></div>`,
+      `<button class="btn btn-sec" data-mclose>إغلاق</button><button class="btn" id="pwSave">حفظ كلمة المرور</button>`, 'sm');
+    $('#pwSave', m).onclick = async () => {
+      const pw = $('#npw', m).value.trim();
+      try {
+        await api('/customers/' + encodeURIComponent(x.phone), 'PUT', { password: pw });
+        const msg = `مرحباً ${x.name.split(' ')[0]} 🌿\nكلمة المرور الجديدة لحسابك في متجر ${A.settings.storeName}: ${pw}\nادخل برقم هاتفك ${x.phone} من صفحة "حسابي وطلباتي"، وننصحك بتغييرها من صفحة بياناتي.`;
+        $('#pwDone', m).innerHTML = `<div class="alert ok">✓ تم تغيير كلمة المرور.</div><a class="btn btn-wa" target="_blank" rel="noopener" href="${esc(waTo(x.phone, msg))}">💬 أرسلها للزبون على واتساب</a>`;
+        $('#pwSave', m).remove();
+      } catch (e) { toast(e.message, 'err'); }
+    };
   }
 
   async function sendCampaignModal(k) {

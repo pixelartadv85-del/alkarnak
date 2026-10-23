@@ -1103,6 +1103,7 @@
           ${field('phone', 'رقم الهاتف', load('jalil-customer', {}).phone, true, 'tel', '05XXXXXXXX', 'dir="ltr" inputmode="tel" autocomplete="tel"')}
           ${field('password', 'كلمة المرور', '', true, 'password', '', 'dir="ltr" autocomplete="current-password"')}
           <button class="btn btn-block">دخول</button>
+          ${waLink() ? `<a class="forgot-link" target="_blank" rel="noopener" href="${esc(waLink('مرحباً، نسيت كلمة المرور لحسابي في المتجر. رقم هاتفي: '))}">نسيت كلمة المرور؟ راسلنا على واتساب</a>` : ''}
         </form>
         <form id="regForm" class="auth-form" hidden>
           <p style="color:var(--muted);margin:0">الحساب اختياري: يحفظ كل طلباتك في مكان واحد، ويوصلك جديد المنتجات والعروض.</p>

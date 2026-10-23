@@ -289,6 +289,11 @@
       need('orders');
       const phone = normPhone(decodeURIComponent(m[1]));
       const c = d.customers.find((x) => x.phone === phone);
+      if (body.password !== undefined) {
+        if (!c) throw new HttpError(404, 'هذا الزبون ليس لديه حساب');
+        if (String(body.password).length < 6) throw new HttpError(400, 'كلمة المرور 6 أحرف على الأقل');
+        c.password = String(body.password); save(); return { ok: true };
+      }
       if (c) c.marketing = bool(body.marketing);
       if (!bool(body.marketing)) d.orders.forEach((o) => { if (o.customer.phone === phone) o.marketing = false; });
       save(); return { ok: true };

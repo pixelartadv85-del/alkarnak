@@ -746,6 +746,14 @@ adm.get('/customers', auth('orders'), (req, res) => {
 adm.put('/customers/:phone', auth('orders'), (req, res) => {
   const phone = normPhone(req.params.phone);
   const c = db().customers.find((x) => x.phone === phone);
+  // تعيين كلمة مرور جديدة لزبون نسي كلمته (يُبطل جلساته القديمة)
+  if (req.body.password !== undefined) {
+    if (!c) return res.status(404).json({ error: 'هذا الزبون ليس لديه حساب' });
+    if (String(req.body.password).length < 6) return res.status(400).json({ error: 'كلمة المرور 6 أحرف على الأقل' });
+    Object.assign(c, hashPassword(String(req.body.password)));
+    store.save();
+    return res.json({ ok: true });
+  }
   if (c) c.marketing = bool(req.body.marketing);
   // إلغاء الاشتراك لزبون بدون حساب: نزيل الموافقة من طلباته
   if (!bool(req.body.marketing)) db().orders.forEach((o) => { if (o.customer.phone === phone) o.marketing = false; });

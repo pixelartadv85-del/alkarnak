@@ -466,6 +466,7 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .acct-layout { display: grid; grid-template-columns: 1.5fr 1fr; gap: 22px; align-items: start; }
 .acct-hello { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
 .acct-auth .auth-form { display: grid; gap: 12px; padding-top: 16px; }
+.forgot-link { text-align: center; color: var(--primary); font-size: .9em; font-weight: 600; }
 .acct-note { background: rgba(var(--primary-rgb), .07); border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; }
 .acct-note a { color: var(--primary); font-weight: 700; }
 .orders-list { display: grid; gap: 10px; }
